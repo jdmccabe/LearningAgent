@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 
-from learning_agent.core.embeddings import HashingEmbedder, OllamaEmbedder
-from learning_agent.core.memory import CorrectionMemory, CorrectionPair, ReferenceMemory
+from learning_agent.core.embeddings import HashingEmbedder, LlamaCppEmbedder
+from learning_agent.core.memory import CorrectionMemory, CorrectionPair, ReferenceMemory, WorkspaceMemory
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,11 +49,35 @@ def test_correction_memory_indexes_and_searches() -> None:
     _clean_scratch()
 
 
-def test_ollama_embedder_rejects_nonlocal_host() -> None:
-    embedder = OllamaEmbedder(host="https://ollama.example.test")
+def test_workspace_memory_is_scoped_by_workspace() -> None:
+    _clean_scratch()
+    project_a = SCRATCH / "project-a"
+    project_b = SCRATCH / "project-b"
+    doc_a = project_a / "project.txt"
+    doc_b = project_b / "project.txt"
+    doc_a.parent.mkdir(parents=True, exist_ok=True)
+    doc_b.parent.mkdir(parents=True, exist_ok=True)
+    doc_a.write_text("Alpha uses a battery-powered radio.", encoding="utf-8")
+    doc_b.write_text("Beta is a software-only batch service.", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="locally|local"):
+    memory_a = WorkspaceMemory(project_a, SCRATCH / "memory", HashingEmbedder(dimensions=64))
+    memory_b = WorkspaceMemory(project_b, SCRATCH / "memory", HashingEmbedder(dimensions=64))
+    memory_a.index_project_files([doc_a])
+    memory_b.index_project_files([doc_b])
+
+    assert memory_a.paths.working_store != memory_b.paths.working_store
+    assert "battery" in memory_a.search("battery radio", top_k=1)[0].record.text
+    assert "software-only" in memory_b.search("software batch", top_k=1)[0].record.text
+    _clean_scratch()
+
+
+def test_llama_cpp_embedder_reports_missing_dependency_or_model() -> None:
+    embedder = LlamaCppEmbedder(model_path=SCRATCH / "missing.gguf")
+
+    try:
         embedder.embed_texts(["hello"])
+    except (RuntimeError, FileNotFoundError) as exc:
+        assert "llama-cpp-python" in str(exc) or "not found" in str(exc)
 
 
 def _clean_scratch() -> None:

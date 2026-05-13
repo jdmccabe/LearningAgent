@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import math
-import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
-from urllib.parse import urlparse
 
 
 class Embedder(Protocol):
@@ -28,25 +26,29 @@ class HashingEmbedder:
 
 
 @dataclass(frozen=True)
-class OllamaEmbedder:
-    """Ollama embedding adapter for a local Ollama service."""
+class LlamaCppEmbedder:
+    """In-process GGUF embedder. No local network service is used."""
 
-    model: str = "embeddinggemma"
-    host: str | None = "http://127.0.0.1:11434"
-    name: str = "ollama"
+    model_path: str | Path = Path("models/ollama/embeddinggemma/embeddinggemma.gguf")
+    name: str = "llama-cpp"
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        resolved_host = _validated_host(self.host or os.environ.get("OLLAMA_HOST"))
         try:
-            import ollama
+            from llama_cpp import Llama
         except ImportError as exc:
             raise RuntimeError(
-                "The 'ollama' package is required for Ollama embeddings. "
-                "Install the optional retrieval dependencies first."
+                "The 'llama-cpp-python' package is required for in-process GGUF "
+                "embeddings. Install the optional local-gguf dependencies first."
             ) from exc
-        client = ollama.Client(host=resolved_host)
-        response = client.embed(model=self.model, input=texts)
-        return [list(vector) for vector in response["embeddings"]]
+        path = Path(self.model_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Embedding model was not found: {path}")
+        model = Llama(model_path=str(path), embedding=True, verbose=False)
+        vectors: list[list[float]] = []
+        for text in texts:
+            response = model.create_embedding(text)
+            vectors.append(list(response["data"][0]["embedding"]))
+        return [_normalize(vector) for vector in vectors]
 
 
 def cosine_similarity(left: list[float], right: list[float]) -> float:
@@ -54,28 +56,6 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
     left_norm = math.sqrt(sum(a * a for a in left))
     right_norm = math.sqrt(sum(b * b for b in right))
     return numerator / (left_norm * right_norm) if left_norm and right_norm else 0.0
-
-
-def _validated_host(host: str | None) -> str:
-    if not host:
-        raise ValueError(
-            "Ollama host is required. Set OLLAMA_HOST or pass --ollama-host "
-            "with a local Ollama service URL."
-        )
-    parsed = urlparse(host)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("Ollama host must be an http(s) URL with a hostname.")
-    hostname = parsed.hostname.lower()
-    if hostname == "localhost":
-        return host
-    try:
-        if not ipaddress.ip_address(hostname).is_loopback:
-            raise ValueError("Ollama must be served locally for this project.")
-    except ValueError as exc:
-        if "Ollama must" in str(exc):
-            raise
-        raise ValueError("Ollama host must be local: use localhost or a loopback IP.") from exc
-    return host
 
 
 def _hash_vector(text: str, dimensions: int) -> list[float]:

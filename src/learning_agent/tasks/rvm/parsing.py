@@ -3,25 +3,25 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from learning_agent.core.documents import Document, load_csv_rows, load_document
+from learning_agent.core.documents import Document, load_table_rows, load_document
 from learning_agent.tasks.rvm.schema import Requirement, RvmDecision
 
 
-ID_KEYS = ("id", "requirement_id", "req_id", "identifier")
-TEXT_KEYS = ("text", "requirement", "shall", "description")
-PARENT_KEYS = ("parent_id", "parent", "parent_requirement")
-STANDARD_KEYS = ("standard", "source_standard")
+ID_KEYS = ("id", "requirement_id", "req_id", "identifier", "object_identifier", "absolute_number")
+TEXT_KEYS = ("text", "requirement", "shall", "description", "object_text", "primary_text", "statement")
+PARENT_KEYS = ("parent_id", "parent", "parent_requirement", "parent_identifier")
+STANDARD_KEYS = ("standard", "source_standard", "source", "module")
 
 
 def parse_requirements(path: str | Path) -> list[Requirement]:
     p = Path(path)
-    if p.suffix.lower() == ".csv":
-        return _parse_requirements_csv(p)
+    if p.suffix.lower() in {".csv", ".tsv", ".xlsx", ".reqif", ".reqifz", ".xml"}:
+        return _parse_requirements_table(p)
     return _parse_requirements_text(load_document(p))
 
 
 def parse_good_rvm(path: str | Path) -> list[RvmDecision]:
-    rows = load_csv_rows(path)
+    rows = load_table_rows(path)
     decisions: list[RvmDecision] = []
     for row in rows:
         normalized = {_clean_key(k): (v or "").strip() for k, v in row.items()}
@@ -41,8 +41,8 @@ def parse_good_rvm(path: str | Path) -> list[RvmDecision]:
     return decisions
 
 
-def _parse_requirements_csv(path: Path) -> list[Requirement]:
-    rows = load_csv_rows(path)
+def _parse_requirements_table(path: Path) -> list[Requirement]:
+    rows = load_table_rows(path)
     requirements: list[Requirement] = []
     for index, row in enumerate(rows, start=1):
         normalized = {_clean_key(k): (v or "").strip() for k, v in row.items()}
@@ -111,4 +111,3 @@ def _split_links(value: str) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in re.split(r"[;,]", value) if item.strip()]
-

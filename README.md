@@ -8,7 +8,7 @@ LearningAgent is an offline-first, model-agnostic workflow framework for reviewi
 - explain downstream impact of requirement changes
 - evaluate workflow quality against known-good RVM examples
 
-The framework does not require an API key. By default it uses deterministic local heuristics. Hosted or local LLMs can be added later through the `ModelAdapter` interface without changing workflow code.
+The framework does not require an API key. By default it uses deterministic local heuristics and file-backed memory. It does not require any local network service.
 
 ## Quick Start
 
@@ -57,23 +57,28 @@ python -m learning_agent.cli suggest-rvm-improvements `
   --out out/improvements.json
 ```
 
+Crystallize a known-good RVM corpus into persistent learned memory:
+
+```powershell
+python -m learning_agent.cli learn-good-rvm `
+  --gold examples/gold_rvm.csv `
+  --standards examples/standards.csv
+```
+
 Index and search reference documents:
 
 ```powershell
 python -m learning_agent.cli index-reference `
-  --docs examples/standards.csv examples/project.txt `
-  --store out/reference_memory.jsonl
+  --docs examples/standards.csv examples/project.txt
 
 python -m learning_agent.cli search-reference `
-  --query "wireless encryption requirement" `
-  --store out/reference_memory.jsonl
+  --query "wireless encryption requirement"
 ```
 
 Store and search reviewer correction pairs:
 
 ```powershell
 python -m learning_agent.cli add-correction `
-  --store out/correction_memory.jsonl `
   --task applicability `
   --input "wireless requirement for batch service" `
   --bad-output applicable `
@@ -81,49 +86,54 @@ python -m learning_agent.cli add-correction `
   --rationale "Project has no wireless communication."
 
 python -m learning_agent.cli search-corrections `
-  --query "wireless applicability" `
-  --store out/correction_memory.jsonl
+  --query "wireless applicability"
 ```
 
-Use Ollama embeddings through a local Ollama service:
+Index and search project working memory isolated to the current workspace:
 
 ```powershell
-python -m learning_agent.cli index-reference `
-  --docs examples/standards.csv `
-  --store out/reference_memory.jsonl `
-  --embedder ollama `
-  --ollama-host "http://127.0.0.1:11434" `
-  --ollama-model embeddinggemma
+python -m learning_agent.cli index-project `
+  --docs examples/project.txt `
+  --workspace .
+
+python -m learning_agent.cli search-project `
+  --query "operator interface" `
+  --workspace .
 ```
 
-Required local Ollama models are listed in `models/ollama-models.txt`.
-The default embedding model is stored in this repository under Git LFS:
+Show the persistent memory locations:
+
+```powershell
+python -m learning_agent.cli memory-paths --workspace .
+```
+
+The repo-contained GGUF embedding model is stored under Git LFS:
 
 - `models/ollama/embeddinggemma/embeddinggemma.gguf`
 - `models/ollama/embeddinggemma/Modelfile`
 
-After cloning, make sure LFS files are present, then load the model into Ollama:
+The default runtime uses `HashingEmbedder`, which is deterministic and service-free. For stronger in-process embeddings, install `.[local-gguf]` and pass `--embedder llama-cpp`. No local network host is used.
 
-```powershell
-git lfs pull
-.\scripts\install_ollama_models.ps1
-```
+## Terminal Use
 
-You can also install the default embedding model from the Ollama registry with:
+Everything is exposed through `python -m learning_agent.cli`, so it can be run from:
 
-```powershell
-ollama pull embeddinggemma
-```
+- VS Code terminals, including GitHub Copilot-assisted workflows
+- Claude Code terminals
+- PowerShell or any shell that can run Python
 
 ## File Formats
 
-The zero-dependency parser supports:
+The parser supports:
 
 - `.txt`, `.md`
 - `.csv`
+- `.tsv`
 - `.json`
+- `.xlsx` with `openpyxl`
+- `.reqif`, `.reqifz`, `.xml` for DOORS/ReqIF-style exports
 
-For `.docx`, `.pdf`, and `.xlsx`, convert to Markdown/CSV first using a tool such as Microsoft MarkItDown, then run the workflow on the converted files.
+For `.docx` and `.pdf`, convert to Markdown/CSV first using a tool such as Microsoft MarkItDown, then run the workflow on the converted files.
 
 ## Architecture
 
@@ -158,7 +168,7 @@ flowchart TD
     U --> V["Policy, prompt, or rule updates"]
     V --> L
 
-    W["Local Ollama embeddings<br/>repo-contained GGUF via Git LFS"] --> H
+    W["Service-free embeddings<br/>hashing or in-process GGUF"] --> H
     W --> J
 ```
 
@@ -169,7 +179,7 @@ Generic core:
 - `learning_agent.core.models`: model adapter interface plus offline adapters
 - `learning_agent.core.documents`: document loading and chunking
 - `learning_agent.core.graph`: small property graph for traceability and impact analysis
-- `learning_agent.core.embeddings`: hashing and Ollama embedding adapters
+- `learning_agent.core.embeddings`: hashing and in-process GGUF embedding adapters
 - `learning_agent.core.vector_store`: JSONL vector store
 - `learning_agent.core.memory`: reference and correction-pair memory
 - `learning_agent.core.evaluation`: reusable classification/link/field metrics
@@ -179,6 +189,12 @@ Requirements task pack:
 - `learning_agent.tasks.rvm.schema`: requirement/RVM data models
 - `learning_agent.tasks.rvm.workflow`: extraction, applicability, verification, trace linking, impact analysis
 - `learning_agent.tasks.rvm.evaluation`: RVM-specific scoring
+
+Memory tiers:
+
+- Reference memory: persistent reusable requirements/reference documents uploaded by the user.
+- Crystallized memory: persistent good examples, reviewer corrections, and learned improvements.
+- Workspace working memory: project-specific context isolated by workspace path so unrelated projects do not contaminate each other.
 
 ## Self-Improving Loop
 
@@ -195,7 +211,7 @@ Later, you can plug in DSPy/GEPA, Ragas, DeepEval, local LLMs, or hosted models.
 
 ## Model Agnostic by Design
 
-The workflow nodes accept a `ModelAdapter`, but the default path uses `NoOpModel` plus deterministic policies. That means it runs without API keys, network access, or local model servers. To add a hosted model, Ollama, llama.cpp, vLLM, or another inference backend, implement:
+The workflow nodes accept a `ModelAdapter`, but the default path uses `NoOpModel` plus deterministic policies. That means it runs without API keys, network access, or local model servers. To add another inference backend, implement:
 
 ```python
 class MyAdapter:
@@ -213,8 +229,9 @@ The base install stays dependency-free. Optional extras are:
 
 ```powershell
 pip install -e ".[graph]"
-pip install -e ".[retrieval]"
+pip install -e ".[ingestion]"
+pip install -e ".[local-gguf]"
 pip install -e ".[all]"
 ```
 
-Ollama support defaults to a local service endpoint. The URL must point to a local Ollama service; non-local hosts are rejected in code.
+The runtime is designed to avoid local network hosts. Retrieval and memory are file-backed, and the optional GGUF embedder runs in process.

@@ -12,8 +12,9 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 graph = ["langgraph>=1.0"]
-retrieval = ["ollama>=0.6"]
-all = ["langgraph>=1.0", "ollama>=0.6"]
+ingestion = ["openpyxl>=3.1"]
+local-gguf = ["llama-cpp-python>=0.3"]
+all = ["langgraph>=1.0", "openpyxl>=3.1", "llama-cpp-python>=0.3"]
 
 [project.scripts]
 learning-agent = "learning_agent.cli:main"

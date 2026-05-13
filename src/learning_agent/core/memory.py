@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -73,3 +75,93 @@ class CorrectionMemory:
     def search(self, query: str, top_k: int = 5) -> list[SearchResult]:
         return self.store.search(query, top_k=top_k, filters={"kind": "correction"})
 
+
+@dataclass(frozen=True)
+class MemoryPaths:
+    root: Path
+    reference_store: Path
+    crystallized_store: Path
+    workspace_root: Path
+    working_store: Path
+    workspace_manifest: Path
+
+
+def default_memory_paths(
+    workspace: str | Path | None = None, root: str | Path | None = None
+) -> MemoryPaths:
+    """Return persistent memory paths.
+
+    Reference and crystallized memories are shared inside this repo. Working
+    memory is isolated per workspace path to avoid project cross-contamination.
+    """
+
+    workspace_path = Path(workspace or Path.cwd()).resolve()
+    memory_root = Path(root or ".learning_agent").resolve()
+    workspace_id = _workspace_id(workspace_path)
+    workspace_root = memory_root / "workspaces" / workspace_id
+    return MemoryPaths(
+        root=memory_root,
+        reference_store=memory_root / "reference" / "reference_memory.jsonl",
+        crystallized_store=memory_root / "crystallized" / "learned_corrections.jsonl",
+        workspace_root=workspace_root,
+        working_store=workspace_root / "working_memory.jsonl",
+        workspace_manifest=workspace_root / "manifest.json",
+    )
+
+
+class WorkspaceMemory:
+    """Project-level working memory isolated to a single workspace."""
+
+    def __init__(
+        self,
+        workspace: str | Path | None = None,
+        root: str | Path | None = None,
+        embedder: Embedder | None = None,
+    ) -> None:
+        self.paths = default_memory_paths(workspace=workspace, root=root)
+        self.embedder = embedder or HashingEmbedder()
+        self.store = JsonlVectorStore(self.paths.working_store, self.embedder)
+        self.paths.workspace_root.mkdir(parents=True, exist_ok=True)
+        if not self.paths.workspace_manifest.exists():
+            self.paths.workspace_manifest.write_text(
+                json.dumps(
+                    {
+                        "workspace": str(Path(workspace or Path.cwd()).resolve()),
+                        "workspace_id": self.paths.workspace_root.name,
+                        "purpose": "Project-scoped working memory. Do not share across workspaces.",
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+    def index_project_files(self, paths: list[str | Path], max_lines: int = 40, overlap: int = 5) -> list[str]:
+        texts: list[str] = []
+        metadatas: list[dict[str, Any]] = []
+        for path in paths:
+            document = load_document(path)
+            for chunk in chunk_document(document, max_lines=max_lines, overlap=overlap):
+                texts.append(chunk.text)
+                metadatas.append(
+                    {
+                        "id": chunk.id,
+                        "kind": "working",
+                        "source": chunk.document_path,
+                        "start_line": chunk.start_line,
+                        "end_line": chunk.end_line,
+                        "workspace_id": self.paths.workspace_root.name,
+                    }
+                )
+        return self.store.add_texts(texts, metadatas)
+
+    def search(self, query: str, top_k: int = 5) -> list[SearchResult]:
+        return self.store.search(
+            query,
+            top_k=top_k,
+            filters={"kind": "working", "workspace_id": self.paths.workspace_root.name},
+        )
+
+
+def _workspace_id(path: Path) -> str:
+    digest = hashlib.sha256(str(path).lower().encode("utf-8")).hexdigest()[:16]
+    return f"{path.name}-{digest}"

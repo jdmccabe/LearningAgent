@@ -1,6 +1,7 @@
-# Required local Ollama models
+# Repo-contained embedding model assets
 #
-# Ollama model binaries are not committed to this repository. Pull them into
-# the local Ollama model store before using Ollama-backed embeddings.
+# The GGUF file is committed through Git LFS so the repository can be cloned
+# with the embedding model asset available locally. Runtime embedding should
+# use the service-free hashing embedder or optional in-process GGUF embedder.
 
 embeddinggemma:latest -> models/ollama/embeddinggemma/embeddinggemma.gguf

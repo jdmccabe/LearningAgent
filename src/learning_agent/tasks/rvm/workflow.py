@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -213,8 +214,21 @@ def _audit(state: WorkflowState, context: dict[str, Any]) -> WorkflowState:
 
 def _serialize(state: WorkflowState) -> WorkflowState:
     graph: PropertyGraph = state["graph"]
+    decisions = list(state["decisions"].values())
     state["result"] = {
-        "decisions": [d.to_dict() for d in state["decisions"].values()],
+        "verification_artifact": {
+            "schema_version": "1.0",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "standard_paths": state.get("standard_paths", []),
+            "project_paths": state.get("project_paths", []),
+            "requirement_count": len(state.get("requirements", [])),
+            "decision_count": len(decisions),
+            "graph_node_count": len(graph.nodes),
+            "graph_edge_count": len(graph.edges),
+            "audit_finding_count": len(state.get("audit_findings", [])),
+            "changed_requirement_ids": state.get("changed_requirement_ids", []),
+        },
+        "decisions": [d.to_dict() for d in decisions],
         "impacts": [i.to_dict() for i in state["impacts"]],
         "audit_findings": state["audit_findings"],
         "graph": graph.to_dict(),

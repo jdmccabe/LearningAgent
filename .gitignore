@@ -21,10 +21,10 @@ dist/
 
 # Local generated outputs
 out/
+.learning_agent/
 
 # Local editor/system files
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
-

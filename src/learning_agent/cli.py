@@ -5,10 +5,17 @@ from pathlib import Path
 from typing import Sequence
 
 from learning_agent.core.documents import write_json
-from learning_agent.core.embeddings import HashingEmbedder, OllamaEmbedder
-from learning_agent.core.memory import CorrectionMemory, CorrectionPair, ReferenceMemory
+from learning_agent.core.embeddings import HashingEmbedder, LlamaCppEmbedder
+from learning_agent.core.memory import (
+    CorrectionMemory,
+    CorrectionPair,
+    ReferenceMemory,
+    WorkspaceMemory,
+    default_memory_paths,
+)
 from learning_agent.tasks.rvm.evaluation import evaluate_rvm
 from learning_agent.tasks.rvm.improvement import suggest_rvm_improvements
+from learning_agent.tasks.rvm.parsing import parse_good_rvm, parse_requirements
 from learning_agent.tasks.rvm.workflow import review_rvm
 
 
@@ -41,19 +48,31 @@ def main(argv: Sequence[str] | None = None) -> None:
     improve.add_argument("--project", nargs="+", required=True, help="Project context files used for prediction.")
     improve.add_argument("--out", required=True, help="Output JSON improvement plan.")
 
+    learn_good = subcommands.add_parser(
+        "learn-good-rvm",
+        help="Crystallize known-good RVM rows into persistent learned memory.",
+    )
+    learn_good.add_argument("--gold", required=True, help="Known-good RVM CSV/TSV/XLSX file.")
+    learn_good.add_argument("--standards", nargs="+", required=True, help="Requirement files used by the good RVM.")
+    learn_good.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
+    _add_embedding_args(learn_good)
+
     index_ref = subcommands.add_parser("index-reference", help="Index reference documents into a JSONL vector store.")
     index_ref.add_argument("--docs", nargs="+", required=True, help="Reference documents to index.")
-    index_ref.add_argument("--store", required=True, help="Vector store JSONL path.")
+    index_ref.add_argument("--store", help="Vector store JSONL path.")
+    index_ref.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
     _add_embedding_args(index_ref)
 
     search_ref = subcommands.add_parser("search-reference", help="Search indexed reference documents.")
     search_ref.add_argument("--query", required=True)
-    search_ref.add_argument("--store", required=True)
+    search_ref.add_argument("--store", help="Vector store JSONL path.")
+    search_ref.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
     search_ref.add_argument("--top-k", type=int, default=5)
     _add_embedding_args(search_ref)
 
     add_correction = subcommands.add_parser("add-correction", help="Add an error-correction pair.")
-    add_correction.add_argument("--store", required=True)
+    add_correction.add_argument("--store", help="Vector store JSONL path.")
+    add_correction.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
     add_correction.add_argument("--task", required=True)
     add_correction.add_argument("--input", required=True)
     add_correction.add_argument("--bad-output", required=True)
@@ -64,9 +83,27 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     search_correction = subcommands.add_parser("search-corrections", help="Search stored correction pairs.")
     search_correction.add_argument("--query", required=True)
-    search_correction.add_argument("--store", required=True)
+    search_correction.add_argument("--store", help="Vector store JSONL path.")
+    search_correction.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
     search_correction.add_argument("--top-k", type=int, default=5)
     _add_embedding_args(search_correction)
+
+    index_project = subcommands.add_parser("index-project", help="Index project details into workspace-scoped working memory.")
+    index_project.add_argument("--docs", nargs="+", required=True, help="Project documents to index.")
+    index_project.add_argument("--workspace", default=".", help="Workspace path for memory isolation.")
+    index_project.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
+    _add_embedding_args(index_project)
+
+    search_project = subcommands.add_parser("search-project", help="Search workspace-scoped project working memory.")
+    search_project.add_argument("--query", required=True)
+    search_project.add_argument("--workspace", default=".", help="Workspace path for memory isolation.")
+    search_project.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
+    search_project.add_argument("--top-k", type=int, default=5)
+    _add_embedding_args(search_project)
+
+    memory_paths = subcommands.add_parser("memory-paths", help="Show persistent memory paths for this workspace.")
+    memory_paths.add_argument("--workspace", default=".")
+    memory_paths.add_argument("--memory-root")
 
     args = parser.parse_args(argv)
     if args.command == "demo":
@@ -98,17 +135,50 @@ def main(argv: Sequence[str] | None = None) -> None:
         write_json(args.out, plan.to_dict())
         print(f"Wrote improvement plan to {Path(args.out).resolve()}")
         return
+    if args.command == "learn-good-rvm":
+        paths = default_memory_paths(root=args.memory_root)
+        memory = CorrectionMemory(paths.crystallized_store, _build_embedder(args))
+        requirements = {
+            req.id: req
+            for standard in args.standards
+            for req in parse_requirements(standard)
+        }
+        pairs = []
+        for decision in parse_good_rvm(args.gold):
+            req = requirements.get(decision.requirement_id)
+            pairs.append(
+                CorrectionPair(
+                    task="rvm_decision",
+                    input_text=req.text if req else decision.requirement_id,
+                    bad_output="",
+                    corrected_output=(
+                        f"applicability={decision.applicability}; "
+                        f"verification_method={decision.verification_method}; "
+                        f"trace_links={','.join(decision.trace_links)}"
+                    ),
+                    rationale=decision.rationale,
+                    tags=["gold_rvm", decision.requirement_id],
+                )
+            )
+        ids = memory.add_pairs(pairs)
+        print(f"Crystallized {len(ids)} good RVM example(s) into {paths.crystallized_store}")
+        return
     if args.command == "index-reference":
-        memory = ReferenceMemory(args.store, _build_embedder(args))
+        paths = default_memory_paths(root=args.memory_root)
+        store = args.store or paths.reference_store
+        memory = ReferenceMemory(store, _build_embedder(args))
         ids = memory.index_files(args.docs)
-        print(f"Indexed {len(ids)} reference chunk(s) into {Path(args.store).resolve()}")
+        print(f"Indexed {len(ids)} reference chunk(s) into {Path(store).resolve()}")
         return
     if args.command == "search-reference":
-        memory = ReferenceMemory(args.store, _build_embedder(args))
+        paths = default_memory_paths(root=args.memory_root)
+        memory = ReferenceMemory(args.store or paths.reference_store, _build_embedder(args))
         _print_results([item.to_dict(include_embedding=False) for item in memory.search(args.query, args.top_k)])
         return
     if args.command == "add-correction":
-        memory = CorrectionMemory(args.store, _build_embedder(args))
+        paths = default_memory_paths(root=args.memory_root)
+        store = args.store or paths.crystallized_store
+        memory = CorrectionMemory(store, _build_embedder(args))
         ids = memory.add_pairs(
             [
                 CorrectionPair(
@@ -121,22 +191,46 @@ def main(argv: Sequence[str] | None = None) -> None:
                 )
             ]
         )
-        print(f"Added {len(ids)} correction pair(s) into {Path(args.store).resolve()}")
+        print(f"Added {len(ids)} correction pair(s) into {Path(store).resolve()}")
         return
     if args.command == "search-corrections":
-        memory = CorrectionMemory(args.store, _build_embedder(args))
+        paths = default_memory_paths(root=args.memory_root)
+        memory = CorrectionMemory(args.store or paths.crystallized_store, _build_embedder(args))
         _print_results([item.to_dict(include_embedding=False) for item in memory.search(args.query, args.top_k)])
+        return
+    if args.command == "index-project":
+        memory = WorkspaceMemory(args.workspace, args.memory_root, _build_embedder(args))
+        ids = memory.index_project_files(args.docs)
+        print(f"Indexed {len(ids)} project chunk(s) into {memory.paths.working_store}")
+        return
+    if args.command == "search-project":
+        memory = WorkspaceMemory(args.workspace, args.memory_root, _build_embedder(args))
+        _print_results([item.to_dict(include_embedding=False) for item in memory.search(args.query, args.top_k)])
+        return
+    if args.command == "memory-paths":
+        paths = default_memory_paths(args.workspace, args.memory_root)
+        _print_results(
+            [
+                {
+                    "root": str(paths.root),
+                    "reference_store": str(paths.reference_store),
+                    "crystallized_store": str(paths.crystallized_store),
+                    "workspace_root": str(paths.workspace_root),
+                    "working_store": str(paths.working_store),
+                    "workspace_manifest": str(paths.workspace_manifest),
+                }
+            ]
+        )
         return
 
 def _add_embedding_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--embedder", choices=["hashing", "ollama"], default="hashing")
-    parser.add_argument("--ollama-host", help="Local Ollama service URL.")
-    parser.add_argument("--ollama-model", default="embeddinggemma")
+    parser.add_argument("--embedder", choices=["hashing", "llama-cpp"], default="hashing")
+    parser.add_argument("--model-path", default="models/ollama/embeddinggemma/embeddinggemma.gguf")
 
 
 def _build_embedder(args: argparse.Namespace):
-    if args.embedder == "ollama":
-        return OllamaEmbedder(model=args.ollama_model, host=args.ollama_host)
+    if args.embedder == "llama-cpp":
+        return LlamaCppEmbedder(model_path=args.model_path)
     return HashingEmbedder()
 
 
