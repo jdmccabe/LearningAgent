@@ -10,6 +10,8 @@ LearningAgent is an offline-first, model-agnostic workflow framework for reviewi
 
 The framework does not require an API key. By default it uses deterministic local heuristics and file-backed memory. It does not require any local network service.
 
+For the full operational and compliance description, see [Workflow Assurance Guide](docs/workflow_assurance_guide.md).
+
 ## Quick Start
 
 Run the demo:
