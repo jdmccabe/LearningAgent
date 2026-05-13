@@ -1,0 +1,7 @@
+id,parent_id,text,standard
+STD-001,,The system shall provide a documented operator interface for manual control.,Example Standard
+STD-001.1,STD-001,The operator interface shall demonstrate start stop and status workflows.,Example Standard
+STD-002,,The system shall encrypt all wireless communication links.,Example Standard
+STD-003,,The system shall include configuration drawings that identify externally visible interfaces.,Example Standard
+STD-004,,The system shall meet a response latency of less than 250 milliseconds under nominal load.,Example Standard
+

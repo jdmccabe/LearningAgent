@@ -1,0 +1,6 @@
+Project Alpha is a software only batch processing service.
+There is no human operator interface and no wireless communication.
+The project exposes one external REST interface documented in the interface control document.
+Performance latency will be measured during load testing.
+Configuration documentation is reviewed during release readiness.
+

@@ -1,0 +1,7 @@
+id,applicability,verification_method,trace_links,rationale
+STD-001,not_applicable,other,,Project has no human operator interface.
+STD-001.1,not_applicable,other,STD-001,Child requirement inherits non-applicability from operator interface scope.
+STD-002,not_applicable,other,,Project has no wireless communication.
+STD-003,applicable,inspection,,External interface documentation can be inspected.
+STD-004,applicable,test,,Latency can be verified through load testing.
+
