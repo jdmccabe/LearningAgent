@@ -54,6 +54,13 @@ python -m learning_agent.cli audit-rvm-compliance `
   --out out/compliance_report.json
 ```
 
+Export the exact worker agent definitions:
+
+```powershell
+python -m learning_agent.cli agent-definitions `
+  --out out/agent_definitions.json
+```
+
 Suggest offline improvements from failures:
 
 ```powershell
@@ -194,6 +201,7 @@ Generic core:
 
 Requirements task pack:
 
+- `learning_agent.tasks.rvm.agents`: versioned worker-agent system definitions
 - `learning_agent.tasks.rvm.schema`: requirement/RVM data models
 - `learning_agent.tasks.rvm.workflow`: extraction, applicability, verification, trace linking, impact analysis
 - `learning_agent.tasks.rvm.evaluation`: RVM-specific scoring
@@ -227,6 +235,31 @@ The auditor flags:
 - missing execution artifacts
 - subjective terms such as `optimal`, `rapid`, `user-friendly`, or `sufficient`
 - not-applicable decisions without architecture/boundary evidence
+
+## Worker Agent Definitions
+
+The workflow uses explicit, versioned worker definitions in `learning_agent.tasks.rvm.agents`.
+
+Current agent set:
+
+- Document Ingestion Agent
+- Traceability Builder Agent
+- Applicability Analyst Agent
+- Verification Planner Agent
+- Impact Analyzer Agent
+- Compliance Auditor Agent
+
+Every review artifact records the active `agent_set_id` and per-agent versions so an auditor can tell which definitions produced the result.
+
+Automated training does **not** directly mutate these definitions. Training from known-good RVMs and human feedback may create proposed updates, but promotion requires:
+
+- reviewed rationale
+- validation against benchmark and holdout RVMs
+- version bump
+- committed change to the agent definition artifact
+- updated audit evidence
+
+This keeps learned behavior useful without allowing silent drift in compliance-controlled instructions.
 
 ## Self-Improving Loop
 

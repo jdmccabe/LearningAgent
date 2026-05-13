@@ -10,6 +10,7 @@ from learning_agent.core.graph import Edge, Node, PropertyGraph
 from learning_agent.core.langgraph_workflow import run_langgraph_workflow
 from learning_agent.core.models import ModelAdapter, NoOpModel
 from learning_agent.core.workflow import Workflow, WorkflowNode, WorkflowState
+from learning_agent.tasks.rvm.agents import AGENT_SET_ID, agent_versions
 from learning_agent.tasks.rvm.compliance import audit_compliance
 from learning_agent.tasks.rvm.parsing import parse_requirements
 from learning_agent.tasks.rvm.policies import RvmPolicy
@@ -230,6 +231,8 @@ def _serialize(state: WorkflowState) -> WorkflowState:
         "verification_artifact": {
             "schema_version": "1.0",
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "agent_set_id": AGENT_SET_ID,
+            "agent_versions": agent_versions(),
             "standard_paths": state.get("standard_paths", []),
             "project_paths": state.get("project_paths", []),
             "requirement_count": len(state.get("requirements", [])),

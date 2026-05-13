@@ -61,7 +61,20 @@ def suggest_rvm_improvements(
             )
     return ImprovementPlan(
         summary=f"Generated {len(suggestions)} candidate improvement(s) from benchmark failures.",
-        suggestions=suggestions,
+        suggestions=[
+            ImprovementSuggestion(
+                kind="agent_definition_governance",
+                target="rvm-aerospace-v1",
+                suggestion=(
+                    "Automated training must not directly mutate approved agent definitions. "
+                    "Convert repeated benchmark failures into reviewed change proposals with "
+                    "version bump, rationale, validation evidence, and human approval."
+                ),
+                evidence="Agent definitions are configuration-controlled compliance artifacts.",
+                confidence=1.0,
+            ),
+            *suggestions,
+        ],
     )
 
 
@@ -128,4 +141,3 @@ def _candidate_exclusion_phrase(line: str) -> str:
 
 def _jaccard(left: set[str], right: set[str]) -> float:
     return len(left & right) / len(left | right) if left or right else 0.0
-

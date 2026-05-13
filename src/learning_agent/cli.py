@@ -13,6 +13,7 @@ from learning_agent.core.memory import (
     WorkspaceMemory,
     default_memory_paths,
 )
+from learning_agent.tasks.rvm.agents import agent_definitions_as_dict
 from learning_agent.tasks.rvm.compliance import audit_compliance_from_file
 from learning_agent.tasks.rvm.evaluation import evaluate_rvm
 from learning_agent.tasks.rvm.improvement import suggest_rvm_improvements
@@ -112,6 +113,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     memory_paths = subcommands.add_parser("memory-paths", help="Show persistent memory paths for this workspace.")
     memory_paths.add_argument("--workspace", default=".")
     memory_paths.add_argument("--memory-root")
+
+    agent_defs = subcommands.add_parser("agent-definitions", help="Print the versioned RVM worker agent definitions.")
+    agent_defs.add_argument("--out", help="Optional JSON output path.")
 
     args = parser.parse_args(argv)
     if args.command == "demo":
@@ -239,6 +243,14 @@ def main(argv: Sequence[str] | None = None) -> None:
                 }
             ]
         )
+        return
+    if args.command == "agent-definitions":
+        definitions = agent_definitions_as_dict()
+        if args.out:
+            write_json(args.out, definitions)
+            print(f"Wrote agent definitions to {Path(args.out).resolve()}")
+        else:
+            _print_results([definitions])
         return
 
 def _add_embedding_args(parser: argparse.ArgumentParser) -> None:
