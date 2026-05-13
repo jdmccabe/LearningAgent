@@ -97,7 +97,19 @@ python -m learning_agent.cli index-reference `
 ```
 
 Required local Ollama models are listed in `models/ollama-models.txt`.
-Install the default embedding model with:
+The default embedding model is stored in this repository under Git LFS:
+
+- `models/ollama/embeddinggemma/embeddinggemma.gguf`
+- `models/ollama/embeddinggemma/Modelfile`
+
+After cloning, make sure LFS files are present, then load the model into Ollama:
+
+```powershell
+git lfs pull
+.\scripts\install_ollama_models.ps1
+```
+
+You can also install the default embedding model from the Ollama registry with:
 
 ```powershell
 ollama pull embeddinggemma

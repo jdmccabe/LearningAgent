@@ -1,0 +1,4 @@
+from ./embeddinggemma.gguf
+template {{ .Prompt }}
+parameter num_ctx 2048
+parameter num_batch 2048

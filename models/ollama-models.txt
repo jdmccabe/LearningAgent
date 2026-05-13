@@ -3,5 +3,4 @@
 # Ollama model binaries are not committed to this repository. Pull them into
 # the local Ollama model store before using Ollama-backed embeddings.
 
-embeddinggemma:latest
-
+embeddinggemma:latest -> models/ollama/embeddinggemma/embeddinggemma.gguf

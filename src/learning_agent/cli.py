@@ -130,7 +130,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 def _add_embedding_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--embedder", choices=["hashing", "ollama"], default="hashing")
-    parser.add_argument("--ollama-host", help="Approved non-loopback Ollama service URL.")
+    parser.add_argument("--ollama-host", help="Local Ollama service URL.")
     parser.add_argument("--ollama-model", default="embeddinggemma")
 
 
