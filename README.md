@@ -127,6 +127,41 @@ For `.docx`, `.pdf`, and `.xlsx`, convert to Markdown/CSV first using a tool suc
 
 ## Architecture
 
+```mermaid
+flowchart TD
+    A["Standard requirements"] --> B["Document loader and parser"]
+    C["Project context documents"] --> B
+    D["Known-good RVMs"] --> E["Evaluation harness"]
+
+    B --> F["Requirement objects"]
+    B --> G["Reference chunks"]
+    G --> H["Reference memory<br/>JSONL vector store"]
+    I["Reviewer corrections"] --> J["Correction memory<br/>error-correction pairs"]
+
+    H --> K["Retrieval context"]
+    J --> K
+    F --> L["LangGraph or default workflow"]
+    K --> L
+
+    L --> M["Build requirement graph"]
+    M --> N["Applicability analyst"]
+    N --> O["Verification planner"]
+    O --> P["Trace linker"]
+    P --> Q["Impact analyzer"]
+    Q --> R["Audit and review flags"]
+    R --> S["RVM decisions and impact report"]
+
+    S --> E
+    E --> T["Metrics and failures"]
+    T --> U["Improvement suggestions"]
+    U --> I
+    U --> V["Policy, prompt, or rule updates"]
+    V --> L
+
+    W["Local Ollama embeddings<br/>repo-contained GGUF via Git LFS"] --> H
+    W --> J
+```
+
 Generic core:
 
 - `learning_agent.core.workflow`: deterministic graph workflow runner
