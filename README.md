@@ -96,6 +96,13 @@ python -m learning_agent.cli index-reference `
   --ollama-model embeddinggemma
 ```
 
+Required local Ollama models are listed in `models/ollama-models.txt`.
+Install the default embedding model with:
+
+```powershell
+ollama pull embeddinggemma
+```
+
 ## File Formats
 
 The zero-dependency parser supports:
