@@ -13,6 +13,7 @@ from learning_agent.core.memory import (
     WorkspaceMemory,
     default_memory_paths,
 )
+from learning_agent.tasks.rvm.compliance import audit_compliance_from_file
 from learning_agent.tasks.rvm.evaluation import evaluate_rvm
 from learning_agent.tasks.rvm.improvement import suggest_rvm_improvements
 from learning_agent.tasks.rvm.parsing import parse_good_rvm, parse_requirements
@@ -37,6 +38,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     evaluate.add_argument("--gold", required=True, help="Known-good RVM CSV.")
     evaluate.add_argument("--pred", required=True, help="Prediction JSON from review-rvm.")
     evaluate.add_argument("--out", help="Optional output JSON report.")
+
+    audit_compliance = subcommands.add_parser(
+        "audit-rvm-compliance",
+        help="Run deterministic aerospace compliance checks on an RVM review JSON.",
+    )
+    audit_compliance.add_argument("--rvm", required=True, help="Review JSON from review-rvm.")
+    audit_compliance.add_argument("--out", help="Optional output JSON report.")
 
     improve = subcommands.add_parser(
         "suggest-rvm-improvements",
@@ -125,6 +133,16 @@ def main(argv: Sequence[str] | None = None) -> None:
         if args.out:
             write_json(args.out, report.to_dict())
             print(f"Wrote evaluation report to {Path(args.out).resolve()}")
+        else:
+            import json
+
+            print(json.dumps(report.to_dict(), indent=2))
+        return
+    if args.command == "audit-rvm-compliance":
+        report = audit_compliance_from_file(args.rvm)
+        if args.out:
+            write_json(args.out, report.to_dict())
+            print(f"Wrote compliance report to {Path(args.out).resolve()}")
         else:
             import json
 

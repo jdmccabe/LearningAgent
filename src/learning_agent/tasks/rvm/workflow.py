@@ -10,6 +10,7 @@ from learning_agent.core.graph import Edge, Node, PropertyGraph
 from learning_agent.core.langgraph_workflow import run_langgraph_workflow
 from learning_agent.core.models import ModelAdapter, NoOpModel
 from learning_agent.core.workflow import Workflow, WorkflowNode, WorkflowState
+from learning_agent.tasks.rvm.compliance import audit_compliance
 from learning_agent.tasks.rvm.parsing import parse_requirements
 from learning_agent.tasks.rvm.policies import RvmPolicy
 from learning_agent.tasks.rvm.schema import Evidence, ImpactReport, Requirement, RvmDecision
@@ -155,10 +156,16 @@ def _link_traces(state: WorkflowState) -> WorkflowState:
     decisions: dict[str, RvmDecision] = state["decisions"]
     requirements: list[Requirement] = state["requirements"]
     by_id = {req.id: req for req in requirements}
+    children_by_parent: dict[str, list[str]] = {}
+    for req in requirements:
+        if req.parent_id:
+            children_by_parent.setdefault(req.parent_id, []).append(req.id)
     for req in requirements:
         decision = decisions[req.id]
         if req.parent_id and req.parent_id in by_id:
+            decision.parent_ids.append(req.parent_id)
             decision.trace_links.append(req.parent_id)
+        decision.child_ids.extend(children_by_parent.get(req.id, []))
         for other in requirements:
             if other.id == req.id:
                 continue
@@ -209,6 +216,10 @@ def _audit(state: WorkflowState, context: dict[str, Any]) -> WorkflowState:
                 }
             )
     state["audit_findings"] = findings
+    state["compliance_report"] = audit_compliance(
+        list(state["decisions"].values()),
+        state["requirements"],
+    )
     return state
 
 
@@ -226,11 +237,14 @@ def _serialize(state: WorkflowState) -> WorkflowState:
             "graph_node_count": len(graph.nodes),
             "graph_edge_count": len(graph.edges),
             "audit_finding_count": len(state.get("audit_findings", [])),
+            "compliance_passed": state["compliance_report"].passed,
+            "compliance_failure_count": state["compliance_report"].failure_count,
             "changed_requirement_ids": state.get("changed_requirement_ids", []),
         },
         "decisions": [d.to_dict() for d in decisions],
         "impacts": [i.to_dict() for i in state["impacts"]],
         "audit_findings": state["audit_findings"],
+        "compliance_report": state["compliance_report"].to_dict(),
         "graph": graph.to_dict(),
     }
     return state

@@ -46,6 +46,14 @@ python -m learning_agent.cli evaluate-rvm `
   --pred out/review.json
 ```
 
+Run deterministic aerospace compliance checks:
+
+```powershell
+python -m learning_agent.cli audit-rvm-compliance `
+  --rvm out/review.json `
+  --out out/compliance_report.json
+```
+
 Suggest offline improvements from failures:
 
 ```powershell
@@ -189,12 +197,36 @@ Requirements task pack:
 - `learning_agent.tasks.rvm.schema`: requirement/RVM data models
 - `learning_agent.tasks.rvm.workflow`: extraction, applicability, verification, trace linking, impact analysis
 - `learning_agent.tasks.rvm.evaluation`: RVM-specific scoring
+- `learning_agent.tasks.rvm.compliance`: deterministic aerospace RVM compliance checks
 
 Memory tiers:
 
 - Reference memory: persistent reusable requirements/reference documents uploaded by the user.
 - Crystallized memory: persistent good examples, reviewer corrections, and learned improvements.
 - Workspace working memory: project-specific context isolated by workspace path so unrelated projects do not contaminate each other.
+
+## Aerospace Compliance Guardrails
+
+The generated RVM is a draft until `audit-rvm-compliance` passes. The compliance auditor is deterministic and treats missing audit evidence as a failure, not a model-confidence issue.
+
+Each production RVM entry must include:
+
+- explicit parent requirement IDs
+- explicit child requirement, implementation, or verification block IDs
+- exactly one primary verification method: `test`, `demonstration`, `inspection`, or `analysis`
+- exact procedure references with document and section anchors
+- exact execution artifacts such as logs, signed reports, or file hashes
+- objective bounded success criteria
+- timestamped author-identified change rationale when applicability or method assumptions change
+
+The auditor flags:
+
+- orphan requirements
+- combined methods such as `test/analysis`
+- vague evidence references
+- missing execution artifacts
+- subjective terms such as `optimal`, `rapid`, `user-friendly`, or `sufficient`
+- not-applicable decisions without architecture/boundary evidence
 
 ## Self-Improving Loop
 
