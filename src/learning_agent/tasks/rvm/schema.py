@@ -36,6 +36,9 @@ class Requirement:
     source_document: str = ""
     parent_id: str | None = None
     standard: str | None = None
+    assurance_standard: str = ""
+    dal: str = ""
+    lifecycle_objectives: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -54,6 +57,9 @@ class RvmDecision:
     execution_artifacts: list[str] = field(default_factory=list)
     success_criteria: str = ""
     change_log: list[dict[str, str]] = field(default_factory=list)
+    assurance_standard: str = ""
+    dal: str = ""
+    lifecycle_objectives: list[str] = field(default_factory=list)
     evidence: list[Evidence] = field(default_factory=list)
     confidence: float = 0.0
     trace_links: list[str] = field(default_factory=list)

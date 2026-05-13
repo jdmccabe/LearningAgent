@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 from typing import Sequence
 
+from learning_agent.core.artifacts import tracked_files, write_manifest
 from learning_agent.core.documents import write_json
 from learning_agent.core.embeddings import HashingEmbedder, LlamaCppEmbedder
 from learning_agent.core.memory import (
@@ -14,10 +15,13 @@ from learning_agent.core.memory import (
     default_memory_paths,
 )
 from learning_agent.tasks.rvm.agents import agent_definitions_as_dict
+from learning_agent.tasks.rvm.approval import create_approval_record
 from learning_agent.tasks.rvm.compliance import audit_compliance_from_file
 from learning_agent.tasks.rvm.evaluation import evaluate_rvm
+from learning_agent.tasks.rvm.export import export_rvm_csv
 from learning_agent.tasks.rvm.improvement import suggest_rvm_improvements
 from learning_agent.tasks.rvm.parsing import parse_good_rvm, parse_requirements
+from learning_agent.tasks.rvm.proposals import create_change_proposal
 from learning_agent.tasks.rvm.workflow import review_rvm
 
 
@@ -47,6 +51,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     audit_compliance.add_argument("--rvm", required=True, help="Review JSON from review-rvm.")
     audit_compliance.add_argument("--out", help="Optional output JSON report.")
 
+    export_rvm = subcommands.add_parser("export-rvm-csv", help="Export review JSON to controlled RVM CSV columns.")
+    export_rvm.add_argument("--rvm", required=True)
+    export_rvm.add_argument("--out", required=True)
+
     improve = subcommands.add_parser(
         "suggest-rvm-improvements",
         help="Suggest offline policy improvements from gold-vs-prediction failures.",
@@ -56,6 +64,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     improve.add_argument("--standards", nargs="+", required=True, help="Requirement files used for prediction.")
     improve.add_argument("--project", nargs="+", required=True, help="Project context files used for prediction.")
     improve.add_argument("--out", required=True, help="Output JSON improvement plan.")
+
+    proposal = subcommands.add_parser("create-proposal", help="Wrap improvement suggestions in a reviewed change proposal.")
+    proposal.add_argument("--improvements", required=True)
+    proposal.add_argument("--author-id", required=True)
+    proposal.add_argument("--rationale", required=True)
+    proposal.add_argument("--out", required=True)
 
     learn_good = subcommands.add_parser(
         "learn-good-rvm",
@@ -117,6 +131,22 @@ def main(argv: Sequence[str] | None = None) -> None:
     agent_defs = subcommands.add_parser("agent-definitions", help="Print the versioned RVM worker agent definitions.")
     agent_defs.add_argument("--out", help="Optional JSON output path.")
 
+    evidence = subcommands.add_parser("hash-evidence", help="Create a SHA-256 manifest for evidence artifacts.")
+    evidence.add_argument("--files", nargs="+", required=True)
+    evidence.add_argument("--out", required=True)
+
+    release = subcommands.add_parser("release-manifest", help="Create a SHA-256 manifest for release/source artifacts.")
+    release.add_argument("--files", nargs="*", help="Files to hash. Defaults to git-tracked files.")
+    release.add_argument("--out", required=True)
+
+    approve = subcommands.add_parser("record-approval", help="Create a signed-off approval state record for an RVM JSON.")
+    approve.add_argument("--rvm", required=True)
+    approve.add_argument("--state", choices=["drafted", "reviewed", "rejected", "approved", "baselined"], required=True)
+    approve.add_argument("--author-id", required=True)
+    approve.add_argument("--role", required=True)
+    approve.add_argument("--justification", required=True)
+    approve.add_argument("--out", required=True)
+
     args = parser.parse_args(argv)
     if args.command == "demo":
         result = review_rvm(
@@ -152,10 +182,18 @@ def main(argv: Sequence[str] | None = None) -> None:
 
             print(json.dumps(report.to_dict(), indent=2))
         return
+    if args.command == "export-rvm-csv":
+        export_rvm_csv(args.rvm, args.out)
+        print(f"Wrote RVM CSV to {Path(args.out).resolve()}")
+        return
     if args.command == "suggest-rvm-improvements":
         plan = suggest_rvm_improvements(args.gold, args.pred, args.standards, args.project)
         write_json(args.out, plan.to_dict())
         print(f"Wrote improvement plan to {Path(args.out).resolve()}")
+        return
+    if args.command == "create-proposal":
+        create_change_proposal(args.improvements, args.author_id, args.rationale, args.out)
+        print(f"Wrote change proposal to {Path(args.out).resolve()}")
         return
     if args.command == "learn-good-rvm":
         paths = default_memory_paths(root=args.memory_root)
@@ -251,6 +289,26 @@ def main(argv: Sequence[str] | None = None) -> None:
             print(f"Wrote agent definitions to {Path(args.out).resolve()}")
         else:
             _print_results([definitions])
+        return
+    if args.command == "hash-evidence":
+        manifest = write_manifest(args.files, args.out)
+        print(f"Wrote {len(manifest.files)} evidence artifact hash(es) to {Path(args.out).resolve()}")
+        return
+    if args.command == "release-manifest":
+        files = args.files or tracked_files()
+        manifest = write_manifest(files, args.out)
+        print(f"Wrote {len(manifest.files)} release artifact hash(es) to {Path(args.out).resolve()}")
+        return
+    if args.command == "record-approval":
+        create_approval_record(
+            args.rvm,
+            args.state,
+            args.author_id,
+            args.role,
+            args.justification,
+            args.out,
+        )
+        print(f"Wrote approval record to {Path(args.out).resolve()}")
         return
 
 def _add_embedding_args(parser: argparse.ArgumentParser) -> None:

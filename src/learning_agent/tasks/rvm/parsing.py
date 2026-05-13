@@ -11,6 +11,9 @@ ID_KEYS = ("id", "requirement_id", "req_id", "identifier", "object_identifier", 
 TEXT_KEYS = ("text", "requirement", "shall", "description", "object_text", "primary_text", "statement")
 PARENT_KEYS = ("parent_id", "parent", "parent_requirement", "parent_identifier")
 STANDARD_KEYS = ("standard", "source_standard", "source", "module")
+ASSURANCE_KEYS = ("assurance_standard", "standard_basis", "certification_basis")
+DAL_KEYS = ("dal", "design_assurance_level", "software_level", "hardware_level")
+OBJECTIVE_KEYS = ("lifecycle_objectives", "objectives", "do_objectives")
 
 
 def parse_requirements(path: str | Path) -> list[Requirement]:
@@ -57,6 +60,9 @@ def _parse_requirements_table(path: Path) -> list[Requirement]:
                 source_document=str(path),
                 parent_id=_first(normalized, PARENT_KEYS) or None,
                 standard=_first(normalized, STANDARD_KEYS) or None,
+                assurance_standard=_first(normalized, ASSURANCE_KEYS),
+                dal=_first(normalized, DAL_KEYS),
+                lifecycle_objectives=_split_links(_first(normalized, OBJECTIVE_KEYS)),
                 metadata={k: v for k, v in normalized.items() if k not in set(ID_KEYS + TEXT_KEYS)},
             )
         )

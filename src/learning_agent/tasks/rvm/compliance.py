@@ -102,6 +102,16 @@ def audit_compliance(decisions: list[RvmDecision], requirements: list[Requiremen
         if decision.applicability == "not_applicable" and not decision.evidence:
             findings.append(_finding(decision.requirement_id, "APPLICABILITY_EVIDENCE", "Not-applicable decision lacks cited architecture or boundary evidence.", "Cite the exact architecture document and section that removes the requirement from project scope."))
 
+        assurance_standard = decision.assurance_standard or (req.assurance_standard if req else "")
+        dal = decision.dal or (req.dal if req else "")
+        objectives = decision.lifecycle_objectives or (req.lifecycle_objectives if req else [])
+        if not assurance_standard:
+            findings.append(_finding(decision.requirement_id, "ASSURANCE_STANDARD", "Assurance standard or certification basis is not recorded.", "Populate assurance_standard with DO-178C, DO-254, or the approved project basis."))
+        if not dal:
+            findings.append(_finding(decision.requirement_id, "ASSURANCE_LEVEL", "DAL/design assurance level is not recorded.", "Populate dal with the approved software/hardware assurance level."))
+        if decision.applicability != "not_applicable" and not objectives:
+            findings.append(_finding(decision.requirement_id, "LIFECYCLE_OBJECTIVES", "Lifecycle objective mapping is not recorded.", "Add the exact lifecycle objective IDs satisfied or verified by this record."))
+
     failures = [finding for finding in findings if finding.severity == "failure"]
     warnings = [finding for finding in findings if finding.severity == "warning"]
     return ComplianceReport(
@@ -125,6 +135,9 @@ def _decision_from_dict(data: dict[str, Any]) -> RvmDecision:
         execution_artifacts=list(data.get("execution_artifacts", [])),
         success_criteria=data.get("success_criteria", ""),
         change_log=list(data.get("change_log", [])),
+        assurance_standard=data.get("assurance_standard", ""),
+        dal=data.get("dal", ""),
+        lifecycle_objectives=list(data.get("lifecycle_objectives", [])),
         evidence=[],
         confidence=float(data.get("confidence", 0.0)),
         trace_links=list(data.get("trace_links", [])),
@@ -140,4 +153,3 @@ def _finding(requirement_id: str, rule_id: str, message: str, fix: str) -> Compl
         message=message,
         fix=fix,
     )
-

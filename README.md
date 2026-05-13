@@ -54,6 +54,41 @@ python -m learning_agent.cli audit-rvm-compliance `
   --out out/compliance_report.json
 ```
 
+Export a controlled RVM CSV:
+
+```powershell
+python -m learning_agent.cli export-rvm-csv `
+  --rvm out/review.json `
+  --out out/review.csv
+```
+
+Hash evidence artifacts:
+
+```powershell
+python -m learning_agent.cli hash-evidence `
+  --files evidence/ATR-102_Run4.log evidence/test-report.pdf `
+  --out out/evidence_manifest.json
+```
+
+Record review or approval state:
+
+```powershell
+python -m learning_agent.cli record-approval `
+  --rvm out/review.json `
+  --state reviewed `
+  --author-id jdoe `
+  --role verification_lead `
+  --justification "Reviewed against ATP-102 Rev B." `
+  --out out/review_approval.json
+```
+
+Create a source/release manifest:
+
+```powershell
+python -m learning_agent.cli release-manifest `
+  --out out/release_manifest.json
+```
+
 Export the exact worker agent definitions:
 
 ```powershell
@@ -70,6 +105,16 @@ python -m learning_agent.cli suggest-rvm-improvements `
   --standards examples/standards.csv `
   --project examples/project.txt `
   --out out/improvements.json
+```
+
+Wrap improvement suggestions in a controlled proposal:
+
+```powershell
+python -m learning_agent.cli create-proposal `
+  --improvements out/improvements.json `
+  --author-id jdoe `
+  --rationale "Holdout benchmark failure triage." `
+  --out proposals/proposal-001.json
 ```
 
 Crystallize a known-good RVM corpus into persistent learned memory:
@@ -226,6 +271,7 @@ Each production RVM entry must include:
 - exact execution artifacts such as logs, signed reports, or file hashes
 - objective bounded success criteria
 - timestamped author-identified change rationale when applicability or method assumptions change
+- assurance standard / certification basis, DAL, and lifecycle objective mapping
 
 The auditor flags:
 
@@ -235,6 +281,15 @@ The auditor flags:
 - missing execution artifacts
 - subjective terms such as `optimal`, `rapid`, `user-friendly`, or `sufficient`
 - not-applicable decisions without architecture/boundary evidence
+- missing assurance standard, DAL, or lifecycle objective mapping
+
+Additional deployment controls:
+
+- `hash-evidence` creates SHA-256 manifests for ATPs, ATRs, logs, reports, and code/design evidence.
+- `export-rvm-csv` emits controlled CSV columns for official RVM review.
+- `record-approval` captures drafted/reviewed/rejected/approved/baselined state with author, role, timestamp, justification, and RVM hash.
+- `release-manifest` hashes tracked release artifacts for configuration management.
+- `create-proposal` keeps training-derived changes in a proposed state until reviewed and versioned.
 
 ## Worker Agent Definitions
 

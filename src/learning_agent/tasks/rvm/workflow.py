@@ -120,6 +120,9 @@ def _decide_applicability(state: WorkflowState, context: dict[str, Any]) -> Work
             applicability=applicability,  # type: ignore[arg-type]
             verification_method="unknown",
             rationale=rationale,
+            assurance_standard=req.assurance_standard,
+            dal=req.dal,
+            lifecycle_objectives=list(req.lifecycle_objectives),
             evidence=evidence,
             confidence=confidence,
         )

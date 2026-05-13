@@ -33,7 +33,14 @@ def test_compliance_audit_flags_low_quality_entry() -> None:
 def test_compliance_audit_accepts_traceable_objective_entry() -> None:
     requirements = [
         Requirement(id="HL-SYS-REQ-402", text="Top level", parent_id=None),
-        Requirement(id="LLR-402-1", text="The system shall transition to Ready-State in <= 1500 milliseconds.", parent_id="HL-SYS-REQ-402"),
+        Requirement(
+            id="LLR-402-1",
+            text="The system shall transition to Ready-State in <= 1500 milliseconds.",
+            parent_id="HL-SYS-REQ-402",
+            assurance_standard="DO-178C",
+            dal="A",
+            lifecycle_objectives=["A-7.1", "A-7.2"],
+        ),
         Requirement(id="CODE-BOOT-READY", text="Implementation block", parent_id="LLR-402-1"),
     ]
     decisions = [
@@ -47,6 +54,9 @@ def test_compliance_audit_accepts_traceable_objective_entry() -> None:
             procedure_reference="SW-ITP-04 Rev B Sec 5.1",
             execution_artifacts=["ATR-102_Run4.log", "sha256:0123456789abcdef0123456789abcdef"],
             success_criteria="Power-On to Ready-State shall be <= 1500 milliseconds and status register 0x00 shall return 0x01.",
+            assurance_standard="DO-178C",
+            dal="A",
+            lifecycle_objectives=["A-7.1", "A-7.2"],
         )
     ]
 
@@ -83,4 +93,3 @@ def test_not_applicable_requires_architecture_evidence_and_change_rationale() ->
     rule_ids = {finding.rule_id for finding in report.findings}
 
     assert "CHANGE_RATIONALE" in rule_ids
-
