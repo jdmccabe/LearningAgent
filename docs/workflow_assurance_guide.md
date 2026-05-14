@@ -8,12 +8,12 @@ LearningAgent is an offline, deterministic, file-backed workflow for drafting an
 
 LearningAgent is designed to support aerospace compliance work by making evidence gaps visible and repeatable. The workflow follows these principles:
 
-- Deterministic execution: default workflow behavior uses deterministic parsing, heuristics, hashing, and rule checks.
+- Controlled execution: default workflow behavior uses LangGraph orchestration with deterministic parsing, heuristics, in-process GGUF embeddings, and rule checks.
 - Traceable outputs: generated review artifacts contain input paths, agent definition versions, requirement counts, graph counts, compliance summary, and findings.
 - Fail-closed compliance: missing evidence is reported as a failure, not as low confidence.
 - No silent learning: known-good RVMs and human feedback create persistent examples and proposed changes, but approved agent definitions and policies are not mutated automatically.
 - Workspace isolation: project working memory is scoped by workspace path and must not contaminate other projects.
-- Service-free runtime: default retrieval and memory use file-backed stores and deterministic hashing. No local network host is required.
+- Service-free runtime: retrieval and memory use file-backed stores with in-process embeddings. No local network host is required.
 
 The workflow helps prepare data for compliance with standards such as DO-178C and DO-254, but final acceptance depends on the project certification plan, tool qualification posture, and authority-approved processes.
 
@@ -195,6 +195,33 @@ python -m learning_agent.cli add-correction `
 
 Interpretation: crystallized memory improves future drafting and triage. It does not change approved worker-agent definitions or compliance rules automatically.
 
+### Learning Queue
+
+Purpose: controlled staging area for feedback captured from normal human review actions. The desktop UI records reviewer approvals, rejections, reviewed states, drafted states, and baselining decisions as pending learning candidates when learning capture is enabled.
+
+Default location:
+
+```text
+.learning_agent/crystallized/learning_queue.jsonl
+```
+
+Format: JSONL records with fields:
+
+- `id`
+- `created_utc`
+- `updated_utc`
+- `status` (`pending`, `approved`, or `rejected`)
+- `source`
+- `task`
+- `input_text`
+- `bad_output`
+- `corrected_output`
+- `rationale`
+- `tags`
+- `applied_ids`
+
+Interpretation: pending candidates are not used as crystallized examples until an authorized user applies them from the UI learning queue. Rejected candidates remain visible for audit history. This supports continued learning without silent mutation of future workflow behavior.
+
 ### Workspace Working Memory
 
 Purpose: project-specific facts and context.
@@ -251,12 +278,16 @@ python -m learning_agent.cli index-reference `
   --docs standard_requirements.xlsx common_procedures.reqif
 ```
 
+Desktop UI: use **Agent Settings** > **Run Initial Optimization** to index reference memory, index project memory when inputs are present, crystallize known-good RVM rows, and write `out/ui/initial_optimization_report.json`.
+
 Generated artifacts:
 
 | Artifact | Default Location | Meaning |
 | --- | --- | --- |
 | Learned examples | `.learning_agent/crystallized/learned_corrections.jsonl` | Persistent known-good decisions and rationale |
+| Learning queue | `.learning_agent/crystallized/learning_queue.jsonl` | Pending, approved, and rejected feedback candidates |
 | Reference memory | `.learning_agent/reference/reference_memory.jsonl` | Searchable reusable source material |
+| UI optimization report | `out/ui/initial_optimization_report.json` | Counts of indexed reference chunks, project chunks, crystallized examples, and memory store locations |
 | Optional evaluation output | User-provided `--out` path | Performance metrics against good RVMs |
 
 Compliance justification: training data is not trusted blindly. It becomes retrievable examples and benchmark evidence. Any policy or agent-definition change must be promoted through a proposal and review process.
@@ -592,4 +623,3 @@ Do not treat these as final compliance evidence by themselves:
 - generated rationale without source anchors
 
 Only exact cited source anchors, approved trace identifiers, objective success criteria, hashed evidence artifacts, and signed review/approval records should be used as compliance evidence.
-

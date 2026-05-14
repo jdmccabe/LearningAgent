@@ -7,7 +7,7 @@ readme = "README.md"
 authors = [
   { name = "LearningAgent contributors" }
 ]
-dependencies = []
+dependencies = ["langgraph>=1.0", "llama-cpp-python>=0.3"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]

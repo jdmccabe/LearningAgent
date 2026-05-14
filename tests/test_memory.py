@@ -80,6 +80,13 @@ def test_llama_cpp_embedder_reports_missing_dependency_or_model() -> None:
         assert "llama-cpp-python" in str(exc) or "not found" in str(exc)
 
 
+def test_default_llama_cpp_model_is_repo_contained() -> None:
+    embedder = LlamaCppEmbedder()
+
+    assert (ROOT / embedder.model_path).exists()
+    assert Path(embedder.model_path).parts[-3:] == ("models", "llama-cpp", "bge-small-en-v1.5-q4_k_m.gguf")
+
+
 def _clean_scratch() -> None:
     if not SCRATCH.exists():
         return

@@ -26,6 +26,21 @@ def test_review_rvm_runs_offline() -> None:
     assert "STD-001.1" in result["result"]["impacts"][0]["impacted_requirement_ids"]
 
 
+def test_review_rvm_default_engine_is_langgraph() -> None:
+    default_result = review_rvm(
+        [ROOT / "examples" / "standards.csv"],
+        [ROOT / "examples" / "project.txt"],
+    )
+    explicit_result = review_rvm(
+        [ROOT / "examples" / "standards.csv"],
+        [ROOT / "examples" / "project.txt"],
+        engine="langgraph",
+    )
+
+    assert default_result["result"]["verification_artifact"]["decision_count"] == 5
+    assert default_result["result"]["decisions"] == explicit_result["result"]["decisions"]
+
+
 def test_rvm_evaluation_scores_predictions() -> None:
     result = review_rvm(
         [ROOT / "examples" / "standards.csv"],

@@ -9,6 +9,7 @@ LearningAgent is an offline-first, model-agnostic workflow framework for reviewi
 - evaluate workflow quality against known-good RVM examples
 
 The framework does not require an API key. By default it uses deterministic local heuristics and file-backed memory. It does not require any local network service.
+LangGraph is a normal project dependency and the default workflow engine.
 
 For the full operational and compliance description, see [Workflow Assurance Guide](docs/workflow_assurance_guide.md).
 For the local desktop control surface, see [Desktop UI Guide](docs/desktop_ui.md).
@@ -27,23 +28,38 @@ Launch the desktop UI:
 python -m learning_agent.ui
 ```
 
+On Windows, you can also run:
+
+```powershell
+.\run_ui.bat
+```
+
+The launcher checks for LangGraph, llama-cpp-python, and Excel ingestion support. If they are missing, it installs them from the checked-in offline wheelhouse under `vendor/wheels` using `--no-index`; it does not download packages or contact a package server.
+
+Offline setup for terminals:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install_offline.ps1
+```
+
+The checked-in wheelhouse targets Windows amd64 with CPython 3.14. A different Python version or operating system needs a refreshed wheelhouse built on a compatible network-enabled machine with `scripts/build_offline_wheelhouse.ps1`.
+
 Analyze your own files:
 
 ```powershell
 python -m learning_agent.cli review-rvm `
   --standards examples/standards.csv `
   --project examples/project.txt `
-  --engine default `
   --out out/review.json
 ```
 
-Run the same workflow through LangGraph after installing optional graph dependencies:
+Use the deterministic fallback runner if you explicitly do not want LangGraph execution:
 
 ```powershell
 python -m learning_agent.cli review-rvm `
   --standards examples/standards.csv `
   --project examples/project.txt `
-  --engine langgraph `
+  --engine built-in `
   --out out/review.json
 ```
 
@@ -176,12 +192,13 @@ Show the persistent memory locations:
 python -m learning_agent.cli memory-paths --workspace .
 ```
 
-The repo-contained GGUF embedding model is stored under Git LFS:
+Repo-contained GGUF embedding model assets are stored under Git LFS:
 
+- `models/llama-cpp/bge-small-en-v1.5-q4_k_m.gguf` (default llama-cpp embedder)
 - `models/ollama/embeddinggemma/embeddinggemma.gguf`
 - `models/ollama/embeddinggemma/Modelfile`
 
-The default runtime uses `HashingEmbedder`, which is deterministic and service-free. For stronger in-process embeddings, install `.[local-gguf]` and pass `--embedder llama-cpp`. No local network host is used.
+The default runtime uses `LlamaCppEmbedder` with the repo-contained BGE GGUF model. For a deterministic fallback, pass `--embedder hashing`. No local network host is used.
 
 ## Terminal Use
 
@@ -217,11 +234,12 @@ flowchart TD
     B --> F["Requirement objects"]
     B --> G["Reference chunks"]
     G --> H["Reference memory<br/>JSONL vector store"]
-    I["Reviewer corrections"] --> J["Correction memory<br/>error-correction pairs"]
+    I["Reviewer dispositions"] --> X["Learning queue<br/>pending feedback candidates"]
+    X --> J["Correction memory<br/>approved error-correction pairs"]
 
     H --> K["Retrieval context"]
     J --> K
-    F --> L["LangGraph or default workflow"]
+    F --> L["LangGraph or built-in workflow"]
     K --> L
 
     L --> M["Build requirement graph"]
@@ -235,7 +253,7 @@ flowchart TD
     S --> E
     E --> T["Metrics and failures"]
     T --> U["Improvement suggestions"]
-    U --> I
+    U --> X
     U --> V["Policy, prompt, or rule updates"]
     V --> L
 
@@ -245,14 +263,14 @@ flowchart TD
 
 Generic core:
 
-- `learning_agent.core.workflow`: deterministic graph workflow runner
-- `learning_agent.core.langgraph_workflow`: optional LangGraph execution adapter
+- `learning_agent.core.workflow`: deterministic fallback workflow runner
+- `learning_agent.core.langgraph_workflow`: default LangGraph execution adapter
 - `learning_agent.core.models`: model adapter interface plus offline adapters
 - `learning_agent.core.documents`: document loading and chunking
 - `learning_agent.core.graph`: small property graph for traceability and impact analysis
 - `learning_agent.core.embeddings`: hashing and in-process GGUF embedding adapters
 - `learning_agent.core.vector_store`: JSONL vector store
-- `learning_agent.core.memory`: reference and correction-pair memory
+- `learning_agent.core.memory`: reference, workspace, and correction-pair memory
 - `learning_agent.core.evaluation`: reusable classification/link/field metrics
 
 Requirements task pack:
@@ -267,6 +285,7 @@ Memory tiers:
 
 - Reference memory: persistent reusable requirements/reference documents uploaded by the user.
 - Crystallized memory: persistent good examples, reviewer corrections, and learned improvements.
+- Learning queue: pending, approved, and rejected feedback candidates captured from review and approval actions before they are crystallized.
 - Workspace working memory: project-specific context isolated by workspace path so unrelated projects do not contaminate each other.
 
 ## Aerospace Compliance Guardrails
@@ -354,15 +373,13 @@ class MyAdapter:
 
 Then pass it into `build_rvm_workflow(model=MyAdapter())` or `review_rvm(..., model=MyAdapter())`.
 
-## Optional Dependencies
+## Dependencies
 
-The base install stays dependency-free. Optional extras are:
+LangGraph and llama-cpp are included in the base project dependencies, so a normal project install sets up the default workflow engine and default GGUF embedder. Optional extras are:
 
 ```powershell
-pip install -e ".[graph]"
 pip install -e ".[ingestion]"
-pip install -e ".[local-gguf]"
 pip install -e ".[all]"
 ```
 
-The runtime is designed to avoid local network hosts. Retrieval and memory are file-backed, and the optional GGUF embedder runs in process.
+The runtime is designed to avoid local network hosts. Retrieval and memory are file-backed, and the GGUF embedder runs in process.

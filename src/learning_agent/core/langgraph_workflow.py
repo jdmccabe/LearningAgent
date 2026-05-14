@@ -6,14 +6,14 @@ from learning_agent.core.workflow import Workflow, WorkflowState
 
 
 def run_langgraph_workflow(workflow: Workflow, state: WorkflowState) -> WorkflowState:
-    """Run a Workflow through LangGraph when the optional package is installed."""
+    """Run a Workflow through LangGraph."""
 
     try:
         from langgraph.graph import END, START, StateGraph
     except ImportError as exc:
         raise RuntimeError(
-            "LangGraph is not installed. Install the optional graph dependencies "
-            "or run the default workflow engine."
+            "LangGraph is not installed. Install the project dependencies with "
+            "`pip install -e .`, or select the built-in fallback engine."
         ) from exc
 
     graph = StateGraph(dict)
@@ -27,4 +27,3 @@ def run_langgraph_workflow(workflow: Workflow, state: WorkflowState) -> Workflow
     app = graph.compile()
     result = app.invoke(dict(state))
     return dict(result)
-

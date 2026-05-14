@@ -29,7 +29,7 @@ class HashingEmbedder:
 class LlamaCppEmbedder:
     """In-process GGUF embedder. No local network service is used."""
 
-    model_path: str | Path = Path("models/ollama/embeddinggemma/embeddinggemma.gguf")
+    model_path: str | Path = Path("models/llama-cpp/bge-small-en-v1.5-q4_k_m.gguf")
     name: str = "llama-cpp"
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:

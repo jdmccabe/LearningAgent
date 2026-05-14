@@ -4,7 +4,7 @@ import json
 import queue
 import threading
 from pathlib import Path
-from tkinter import END, BOTH, LEFT, RIGHT, TOP, X, Y, Listbox, StringVar, Tk, filedialog, messagebox, scrolledtext, ttk
+from tkinter import END, BOTH, LEFT, RIGHT, TOP, X, Y, BooleanVar, Listbox, StringVar, Tk, filedialog, messagebox, scrolledtext, ttk
 from typing import Any, Callable
 
 from learning_agent.core.artifacts import tracked_files, write_manifest
@@ -26,17 +26,23 @@ from learning_agent.tasks.rvm.parsing import parse_good_rvm, parse_requirements
 from learning_agent.tasks.rvm.proposals import create_change_proposal
 from learning_agent.tasks.rvm.workflow import review_rvm
 from learning_agent.ui_support import (
+    append_learning_candidate,
     artifact_inventory,
+    create_learning_candidate,
+    format_memory_inventory,
     format_score,
+    learning_queue_path,
+    load_learning_candidates,
     load_review,
     memory_inventory,
     required_human_actions,
     summarize_review,
+    update_learning_candidate_status,
 )
 
 
 APP_TITLE = "LearningAgent RVM Control Center"
-DEFAULT_MODEL_PATH = "models/ollama/embeddinggemma/embeddinggemma.gguf"
+DEFAULT_MODEL_PATH = "models/llama-cpp/bge-small-en-v1.5-q4_k_m.gguf"
 DEFAULT_REVIEW_PATH = Path("out/ui/review.json")
 DEFAULT_COMPLIANCE_PATH = Path("out/ui/compliance_report.json")
 
@@ -61,6 +67,17 @@ class FileList(ttk.Frame):
         body = ttk.Frame(self)
         body.pack(side=TOP, fill=BOTH, expand=True, pady=(4, 0))
         self.listbox = _ListBox(body, height=height)
+        self.listbox.configure(
+            background="#0b1118",
+            foreground="#e6edf3",
+            selectbackground="#2f81f7",
+            selectforeground="#ffffff",
+            relief="flat",
+            borderwidth=1,
+            highlightthickness=1,
+            highlightbackground="#334155",
+            highlightcolor="#58a6ff",
+        )
         self.listbox.pack(side=LEFT, fill=BOTH, expand=True)
         scrollbar = ttk.Scrollbar(body, orient="vertical", command=self.listbox.yview)
         scrollbar.pack(side=RIGHT, fill=Y)
@@ -100,16 +117,17 @@ class LearningAgentApp(Tk):
         self.workspace_var = StringVar(value=str(Path.cwd()))
         self.memory_root_var = StringVar(value=str(Path(".learning_agent").resolve()))
         self.out_dir_var = StringVar(value=str(Path("out/ui").resolve()))
-        self.engine_var = StringVar(value="default")
-        self.embedder_var = StringVar(value="hashing")
+        self.engine_var = StringVar(value="langgraph")
+        self.embedder_var = StringVar(value="llama-cpp")
         self.model_path_var = StringVar(value=DEFAULT_MODEL_PATH)
         self.changed_ids_var = StringVar(value="")
         self.gold_rvm_var = StringVar(value="")
         self.review_path_var = StringVar(value=str(self.latest_review_path.resolve()))
         self.status_var = StringVar(value="Ready")
 
-        self.correction_task_var = StringVar(value="rvm_decision")
-        self.correction_tags_var = StringVar(value="")
+        self.learning_enabled_var = BooleanVar(value=True)
+        self.auto_capture_feedback_var = BooleanVar(value=True)
+        self.require_learning_approval_var = BooleanVar(value=True)
         self.search_query_var = StringVar(value="")
         self.search_scope_var = StringVar(value="Reference memory")
         self.approval_state_var = StringVar(value="reviewed")
@@ -120,6 +138,7 @@ class LearningAgentApp(Tk):
         self._build_layout()
         self._seed_examples()
         self._refresh_memory_paths()
+        self._refresh_learning_queue()
         self._refresh_artifacts()
         self.after(100, self._poll_queue)
 
@@ -127,12 +146,83 @@ class LearningAgentApp(Tk):
         style = ttk.Style(self)
         if "clam" in style.theme_names():
             style.theme_use("clam")
-        style.configure("Title.TLabel", font=("Segoe UI", 16, "bold"))
-        style.configure("Subtitle.TLabel", font=("Segoe UI", 10), foreground="#445063")
-        style.configure("Section.TLabel", font=("Segoe UI", 10, "bold"))
-        style.configure("Metric.TLabel", font=("Segoe UI", 15, "bold"))
-        style.configure("Status.TLabel", font=("Segoe UI", 10, "bold"))
+        self.configure(bg="#0f141b")
+        self.option_add("*Font", ("Segoe UI", 10))
+        self.option_add("*Listbox.background", "#121923")
+        self.option_add("*Listbox.foreground", "#e6edf3")
+        self.option_add("*Listbox.selectBackground", "#2f81f7")
+        self.option_add("*Listbox.selectForeground", "#ffffff")
+
+        bg = "#0f141b"
+        surface = "#151d27"
+        surface_2 = "#1b2532"
+        border = "#334155"
+        text = "#e6edf3"
+        muted = "#94a3b8"
+        accent = "#2f81f7"
+        accent_hover = "#58a6ff"
+        field = "#0b1118"
+
+        style.configure(".", background=bg, foreground=text, fieldbackground=field, bordercolor=border)
+        style.configure("TFrame", background=bg)
+        style.configure("TLabelframe", background=bg, foreground=text, bordercolor=border, relief="solid")
+        style.configure("TLabelframe.Label", background=bg, foreground="#cbd5e1", font=("Segoe UI", 10, "bold"))
+        style.configure("TLabel", background=bg, foreground=text)
+        style.configure("Title.TLabel", background=bg, foreground="#f8fafc", font=("Segoe UI", 18, "bold"))
+        style.configure("Subtitle.TLabel", background=bg, foreground=muted, font=("Segoe UI", 10))
+        style.configure("Section.TLabel", background=bg, foreground="#dbeafe", font=("Segoe UI", 10, "bold"))
+        style.configure("Metric.TLabel", background=bg, foreground="#7dd3fc", font=("Segoe UI", 16, "bold"))
+        style.configure("Status.TLabel", background=bg, foreground="#a7f3d0", font=("Segoe UI", 10, "bold"))
+        style.configure("TButton", background=surface_2, foreground=text, bordercolor=border, focusthickness=1, padding=(10, 5))
+        style.map(
+            "TButton",
+            background=[("active", "#243244"), ("pressed", accent)],
+            foreground=[("disabled", "#64748b"), ("active", "#ffffff")],
+            bordercolor=[("focus", accent_hover)],
+        )
+        style.configure("TCheckbutton", background=bg, foreground=text)
+        style.map("TCheckbutton", background=[("active", bg)], foreground=[("active", "#ffffff")])
+        style.configure("TEntry", fieldbackground=field, foreground=text, insertcolor=text, bordercolor=border)
+        style.configure("TCombobox", fieldbackground=field, background=surface_2, foreground=text, arrowcolor=text)
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", field)],
+            foreground=[("readonly", text)],
+            selectbackground=[("readonly", field)],
+            selectforeground=[("readonly", text)],
+        )
+        style.configure("TNotebook", background=bg, borderwidth=0)
+        style.configure("TNotebook.Tab", background=surface, foreground=muted, padding=(14, 8), bordercolor=border)
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", surface_2), ("active", "#202b3a")],
+            foreground=[("selected", "#ffffff"), ("active", "#dbeafe")],
+        )
+        style.configure(
+            "Treeview",
+            background=field,
+            fieldbackground=field,
+            foreground=text,
+            bordercolor=border,
+            rowheight=26,
+        )
+        style.configure("Treeview.Heading", background=surface_2, foreground="#cbd5e1", font=("Segoe UI", 9, "bold"))
+        style.map("Treeview", background=[("selected", accent)], foreground=[("selected", "#ffffff")])
         style.configure("Action.Treeview", rowheight=28)
+        style.configure("Horizontal.TProgressbar", troughcolor=field, background=accent, bordercolor=border, lightcolor=accent, darkcolor=accent)
+
+    def _style_text_widget(self, widget: scrolledtext.ScrolledText) -> None:
+        widget.configure(
+            background="#0b1118",
+            foreground="#e6edf3",
+            insertbackground="#e6edf3",
+            selectbackground="#2f81f7",
+            selectforeground="#ffffff",
+            relief="flat",
+            borderwidth=1,
+            padx=8,
+            pady=6,
+        )
 
     def _build_layout(self) -> None:
         root = ttk.Frame(self, padding=12)
@@ -152,7 +242,7 @@ class LearningAgentApp(Tk):
         self.notebook.pack(fill=BOTH, expand=True)
 
         self._build_inputs_tab()
-        self._build_training_tab()
+        self._build_agent_settings_tab()
         self._build_run_tab()
         self._build_results_tab()
         self._build_artifacts_tab()
@@ -180,7 +270,18 @@ class LearningAgentApp(Tk):
         self.evidence_list = FileList(right, "Evidence artifacts to hash", [("Evidence files", "*.*")], height=4)
         self.evidence_list.pack(fill=BOTH, expand=True, pady=(0, 10))
 
-        controls = ttk.LabelFrame(right, text="Run configuration", padding=10)
+    def _build_agent_settings_tab(self) -> None:
+        tab = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(tab, text="Agent Settings")
+
+        body = ttk.PanedWindow(tab, orient="horizontal")
+        body.pack(fill=BOTH, expand=True)
+        left = ttk.Frame(body, padding=(0, 0, 8, 0))
+        right = ttk.Frame(body, padding=(8, 0, 0, 0))
+        body.add(left, weight=1)
+        body.add(right, weight=1)
+
+        controls = ttk.LabelFrame(left, text="Workflow and memory policy", padding=10)
         controls.pack(fill=X)
         self._path_row(controls, "Workspace", self.workspace_var, self._choose_workspace, 0)
         self._path_row(controls, "Memory root", self.memory_root_var, self._choose_memory_root, 1)
@@ -192,7 +293,7 @@ class LearningAgentApp(Tk):
         ttk.Label(controls, text="Workflow engine").grid(row=6, column=0, sticky="w", pady=4)
         ttk.Combobox(
             controls,
-            values=["default", "langgraph"],
+            values=["langgraph", "built-in"],
             textvariable=self.engine_var,
             state="readonly",
             width=18,
@@ -200,65 +301,62 @@ class LearningAgentApp(Tk):
         ttk.Label(controls, text="Embedder").grid(row=7, column=0, sticky="w", pady=4)
         ttk.Combobox(
             controls,
-            values=["hashing", "llama-cpp"],
+            values=["llama-cpp", "hashing"],
             textvariable=self.embedder_var,
             state="readonly",
             width=18,
         ).grid(row=7, column=1, sticky="w", pady=4, padx=(8, 8))
+        ttk.Checkbutton(controls, text="Capture review feedback as learning candidates", variable=self.auto_capture_feedback_var).grid(
+            row=8, column=1, sticky="w", pady=4, padx=(8, 8)
+        )
+        ttk.Checkbutton(controls, text="Require approval before applying learned candidates", variable=self.require_learning_approval_var).grid(
+            row=9, column=1, sticky="w", pady=4, padx=(8, 8)
+        )
+        ttk.Checkbutton(controls, text="Enable learning memory for future runs", variable=self.learning_enabled_var).grid(
+            row=10, column=1, sticky="w", pady=4, padx=(8, 8)
+        )
         controls.columnconfigure(1, weight=1)
 
-        paths = ttk.LabelFrame(right, text="Resolved persistent memory locations", padding=10)
+        optimization = ttk.LabelFrame(left, text="Initial optimization from known-good RVMs", padding=10)
+        optimization.pack(fill=X, pady=(10, 0))
+        ttk.Button(optimization, text="Run Initial Optimization", command=self._run_initial_optimization).pack(side=LEFT, padx=(0, 6))
+        ttk.Button(optimization, text="Crystallize Good RVM", command=self._learn_good_rvm).pack(side=LEFT, padx=6)
+        ttk.Button(optimization, text="Suggest Improvements", command=self._suggest_improvements).pack(side=LEFT, padx=6)
+        ttk.Button(optimization, text="Create Change Proposal", command=self._create_change_proposal).pack(side=LEFT, padx=6)
+
+        paths = ttk.LabelFrame(left, text="Resolved persistent memory locations", padding=10)
         paths.pack(fill=BOTH, expand=True, pady=(10, 0))
         self.memory_paths_text = scrolledtext.ScrolledText(paths, height=9, wrap="word")
+        self._style_text_widget(self.memory_paths_text)
         self.memory_paths_text.pack(fill=BOTH, expand=True)
         ttk.Button(paths, text="Refresh Memory Paths", command=self._refresh_memory_paths).pack(side=RIGHT, pady=(8, 0))
 
-    def _build_training_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(tab, text="Training & Memory")
+        indexing = ttk.LabelFrame(right, text="Reference and project memory", padding=10)
+        indexing.pack(fill=X)
+        ttk.Button(indexing, text="Index Reference Docs", command=self._index_reference_docs).pack(side=LEFT, padx=(0, 6))
+        ttk.Button(indexing, text="Index Project Memory", command=self._index_project_docs).pack(side=LEFT, padx=6)
 
-        top = ttk.Frame(tab)
-        top.pack(fill=X)
-        ttk.Button(top, text="Crystallize Good RVM", command=self._learn_good_rvm).pack(side=LEFT, padx=(0, 6))
-        ttk.Button(top, text="Index Reference Docs", command=self._index_reference_docs).pack(side=LEFT, padx=6)
-        ttk.Button(top, text="Index Project Memory", command=self._index_project_docs).pack(side=LEFT, padx=6)
-        ttk.Button(top, text="Suggest Improvements", command=self._suggest_improvements).pack(side=LEFT, padx=6)
-        ttk.Button(top, text="Create Change Proposal", command=self._create_change_proposal).pack(side=LEFT, padx=6)
-
-        body = ttk.PanedWindow(tab, orient="horizontal")
-        body.pack(fill=BOTH, expand=True, pady=(10, 0))
-        left = ttk.Frame(body, padding=(0, 0, 8, 0))
-        right = ttk.Frame(body, padding=(8, 0, 0, 0))
-        body.add(left, weight=1)
-        body.add(right, weight=1)
-
-        correction = ttk.LabelFrame(left, text="Human feedback correction pair", padding=10)
-        correction.pack(fill=BOTH, expand=True)
-        self._entry_row(correction, "Task", self.correction_task_var, 0)
-        self._entry_row(correction, "Tags", self.correction_tags_var, 1)
-        ttk.Label(correction, text="Input context").grid(row=2, column=0, sticky="nw", pady=4)
-        self.correction_input = scrolledtext.ScrolledText(correction, height=5, wrap="word")
-        self.correction_input.grid(row=2, column=1, sticky="nsew", pady=4, padx=(8, 0))
-        ttk.Label(correction, text="Bad output").grid(row=3, column=0, sticky="nw", pady=4)
-        self.correction_bad = scrolledtext.ScrolledText(correction, height=4, wrap="word")
-        self.correction_bad.grid(row=3, column=1, sticky="nsew", pady=4, padx=(8, 0))
-        ttk.Label(correction, text="Corrected output").grid(row=4, column=0, sticky="nw", pady=4)
-        self.correction_good = scrolledtext.ScrolledText(correction, height=4, wrap="word")
-        self.correction_good.grid(row=4, column=1, sticky="nsew", pady=4, padx=(8, 0))
-        ttk.Label(correction, text="Rationale").grid(row=5, column=0, sticky="nw", pady=4)
-        self.correction_rationale = scrolledtext.ScrolledText(correction, height=4, wrap="word")
-        self.correction_rationale.grid(row=5, column=1, sticky="nsew", pady=4, padx=(8, 0))
-        ttk.Button(correction, text="Save Correction Pair", command=self._add_correction_pair).grid(
-            row=6, column=1, sticky="e", pady=(8, 0)
+        queue_frame = ttk.LabelFrame(right, text="Learning queue", padding=10)
+        queue_frame.pack(fill=BOTH, expand=True, pady=(10, 0))
+        queue_buttons = ttk.Frame(queue_frame)
+        queue_buttons.pack(fill=X, pady=(0, 8))
+        ttk.Button(queue_buttons, text="Refresh Queue", command=self._refresh_learning_queue).pack(side=LEFT, padx=(0, 6))
+        ttk.Button(queue_buttons, text="Apply Selected to Crystallized Memory", command=self._apply_selected_learning).pack(side=LEFT, padx=6)
+        ttk.Button(queue_buttons, text="Reject Selected", command=self._reject_selected_learning).pack(side=LEFT, padx=6)
+        self.learning_tree = ttk.Treeview(
+            queue_frame,
+            columns=("status", "task", "source", "created", "rationale"),
+            show="headings",
+            height=7,
         )
-        correction.columnconfigure(1, weight=1)
-        correction.rowconfigure(2, weight=1)
-        correction.rowconfigure(3, weight=1)
-        correction.rowconfigure(4, weight=1)
-        correction.rowconfigure(5, weight=1)
+        self._setup_tree(
+            self.learning_tree,
+            [("status", 90), ("task", 150), ("source", 90), ("created", 170), ("rationale", 430)],
+        )
+        self.learning_tree.pack(fill=BOTH, expand=True)
 
         search = ttk.LabelFrame(right, text="Search persistent memory", padding=10)
-        search.pack(fill=BOTH, expand=True)
+        search.pack(fill=BOTH, expand=True, pady=(10, 0))
         row = ttk.Frame(search)
         row.pack(fill=X)
         ttk.Combobox(
@@ -271,6 +369,7 @@ class LearningAgentApp(Tk):
         ttk.Entry(row, textvariable=self.search_query_var).pack(side=LEFT, fill=X, expand=True, padx=8)
         ttk.Button(row, text="Search", command=self._search_memory).pack(side=LEFT)
         self.memory_results = scrolledtext.ScrolledText(search, wrap="word")
+        self._style_text_widget(self.memory_results)
         self.memory_results.pack(fill=BOTH, expand=True, pady=(10, 0))
 
     def _build_run_tab(self) -> None:
@@ -296,6 +395,7 @@ class LearningAgentApp(Tk):
         self.progress = ttk.Progressbar(tab, mode="indeterminate")
         self.progress.pack(fill=X, pady=(12, 8))
         self.run_log = scrolledtext.ScrolledText(tab, wrap="word", height=28)
+        self._style_text_widget(self.run_log)
         self.run_log.pack(fill=BOTH, expand=True)
 
     def _build_results_tab(self) -> None:
@@ -398,6 +498,7 @@ class LearningAgentApp(Tk):
         self.artifacts_tree.bind("<<TreeviewSelect>>", self._preview_selected_artifact)
 
         self.artifact_preview = scrolledtext.ScrolledText(right, wrap="word")
+        self._style_text_widget(self.artifact_preview)
         self.artifact_preview.pack(fill=BOTH, expand=True)
 
     def _build_approvals_tab(self) -> None:
@@ -410,6 +511,7 @@ class LearningAgentApp(Tk):
         right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(8, 0))
 
         self.approval_context = scrolledtext.ScrolledText(left, wrap="word")
+        self._style_text_widget(self.approval_context)
         self.approval_context.pack(fill=BOTH, expand=True)
         ttk.Button(left, text="Refresh Approval Context", command=self._refresh_approval_context).pack(
             side=RIGHT, pady=(8, 0)
@@ -426,6 +528,7 @@ class LearningAgentApp(Tk):
         self._entry_row(right, "Role", self.role_var, 2)
         ttk.Label(right, text="Justification").grid(row=3, column=0, sticky="nw", pady=4)
         self.justification_text = scrolledtext.ScrolledText(right, height=10, wrap="word")
+        self._style_text_widget(self.justification_text)
         self.justification_text.grid(row=3, column=1, sticky="nsew", pady=4, padx=(8, 0))
         ttk.Button(right, text="Create Approval Artifact", command=self._record_approval).grid(
             row=4, column=1, sticky="e", pady=(8, 0)
@@ -437,6 +540,7 @@ class LearningAgentApp(Tk):
         tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(tab, text="Guide")
         guide = scrolledtext.ScrolledText(tab, wrap="word")
+        self._style_text_widget(guide)
         guide.pack(fill=BOTH, expand=True)
         guide.insert(
             END,
@@ -444,12 +548,12 @@ class LearningAgentApp(Tk):
                 [
                     "LearningAgent UI workflow",
                     "",
-                    "1. Inputs: add standards, DOORS/ReqIF or Excel exports, project context, evidence files, and a known-good RVM when training or benchmarking.",
-                    "2. Training & Memory: index reference documents, crystallize known-good RVMs, capture human correction pairs, and create reviewed change proposals.",
+                    "1. Inputs: add standards, DOORS/ReqIF or Excel exports, project context, and evidence files.",
+                    "2. Agent Settings: configure workflow, memory, learning policy, initial optimization, and the learning queue.",
                     "3. Run: execute the draft RVM workflow, audit it deterministically, export controlled CSVs, hash evidence, and create release manifests.",
                     "4. Results: review confidence, compliance failures, not-applicable decisions, impact analysis, and the exact human actions required before sign-off.",
                     "5. Artifacts: inspect generated JSON, CSV, manifests, proposals, and approval records from the configured output directory.",
-                    "6. Approvals: record drafted, reviewed, rejected, approved, or baselined state with an author, role, justification, timestamp, and RVM hash.",
+                    "6. Approvals: record drafted, reviewed, rejected, approved, or baselined state with an author, role, justification, timestamp, RVM hash, and optional learning candidate.",
                     "",
                     "The authoritative operating guide is docs/workflow_assurance_guide.md.",
                     "Generated operational artifacts are written under the configured output directory, defaulting to out/ui/.",
@@ -540,7 +644,7 @@ class LearningAgentApp(Tk):
         inventory = memory_inventory(paths)
         self.memory_paths_text.configure(state="normal")
         self.memory_paths_text.delete("1.0", END)
-        self.memory_paths_text.insert(END, json.dumps(inventory, indent=2))
+        self.memory_paths_text.insert(END, format_memory_inventory(inventory))
         self.memory_paths_text.configure(state="disabled")
 
     def _changed_ids(self) -> list[str]:
@@ -595,6 +699,8 @@ class LearningAgentApp(Tk):
                     self.active_worker = False
                     self.progress.stop()
                     self._refresh_artifacts()
+                    self._refresh_learning_queue()
+                    self._refresh_memory_paths()
                     self._load_results_if_available()
                 elif kind == "error":
                     label, exc = payload
@@ -777,28 +883,158 @@ class LearningAgentApp(Tk):
 
         self._run_worker("Index project working memory", worker)
 
-    def _add_correction_pair(self) -> None:
+    def _run_initial_optimization(self) -> None:
+        gold_path = self.gold_rvm_var.get()
+        standards = list(self.standards_list.items)
+        projects = list(self.project_list.items)
         workspace = self.workspace_var.get()
         memory_root = self.memory_root_var.get()
         embedder_name = self.embedder_var.get()
         model_path = self.model_path_var.get()
-        tags = [item.strip() for item in self.correction_tags_var.get().split(",") if item.strip()]
-        pair = CorrectionPair(
-            task=self.correction_task_var.get().strip() or "rvm_decision",
-            input_text=self._text(self.correction_input),
-            bad_output=self._text(self.correction_bad),
-            corrected_output=self._text(self.correction_good),
-            rationale=self._text(self.correction_rationale),
-            tags=tags,
-        )
+        review = Path(self.review_path_var.get())
+        report_out = self._out_path("initial_optimization_report.json")
+        improvements_out = self._out_path("improvements.json")
 
         def worker() -> str:
+            if not gold_path:
+                raise ValueError("Select a known-good RVM first.")
+            if not standards:
+                raise ValueError("Add standards used by the known-good RVM.")
             paths = default_memory_paths(workspace, memory_root)
-            memory = CorrectionMemory(paths.crystallized_store, self._build_embedder(embedder_name, model_path))
-            ids = memory.add_pairs([pair])
-            return f"Saved correction pair {', '.join(ids)} into {paths.crystallized_store}"
+            embedder = self._build_embedder(embedder_name, model_path)
+            reference_ids = ReferenceMemory(paths.reference_store, embedder).index_files(standards)
+            project_ids: list[str] = []
+            if projects:
+                project_ids = WorkspaceMemory(workspace, memory_root, embedder).index_project_files(projects)
+            requirements = {
+                req.id: req
+                for standard in standards
+                for req in parse_requirements(standard)
+            }
+            pairs = []
+            for decision in parse_good_rvm(gold_path):
+                req = requirements.get(decision.requirement_id)
+                pairs.append(
+                    CorrectionPair(
+                        task="rvm_decision",
+                        input_text=req.text if req else decision.requirement_id,
+                        bad_output="",
+                        corrected_output=(
+                            f"applicability={decision.applicability}; "
+                            f"verification_method={decision.verification_method}; "
+                            f"trace_links={','.join(decision.trace_links)}"
+                        ),
+                        rationale=decision.rationale,
+                        tags=["gold_rvm", decision.requirement_id, "initial_optimization"],
+                    )
+                )
+            correction_ids = CorrectionMemory(paths.crystallized_store, embedder).add_pairs(pairs)
+            improvement_written = False
+            if review.exists():
+                plan = suggest_rvm_improvements(gold_path, review, standards, projects)
+                write_json(improvements_out, plan.to_dict())
+                improvement_written = True
+            write_json(
+                report_out,
+                {
+                    "known_good_rvm": gold_path,
+                    "reference_chunks_indexed": len(reference_ids),
+                    "project_chunks_indexed": len(project_ids),
+                    "crystallized_examples": len(correction_ids),
+                    "improvements_written": str(improvements_out.resolve()) if improvement_written else "",
+                    "memory": {
+                        "reference_store": str(paths.reference_store),
+                        "crystallized_store": str(paths.crystallized_store),
+                        "working_store": str(paths.working_store),
+                    },
+                },
+            )
+            return (
+                f"Initial optimization complete. Indexed {len(reference_ids)} reference chunk(s), "
+                f"{len(project_ids)} project chunk(s), and crystallized {len(correction_ids)} known-good example(s). "
+                f"Wrote report to {report_out.resolve()}"
+            )
 
-        self._run_worker("Save correction pair", worker)
+        self._run_worker("Run initial optimization", worker)
+
+    def _learning_queue_file(self) -> Path:
+        paths = default_memory_paths(self.workspace_var.get(), self.memory_root_var.get())
+        return learning_queue_path(paths)
+
+    def _refresh_learning_queue(self) -> None:
+        if not hasattr(self, "learning_tree"):
+            return
+        queue_file = self._learning_queue_file()
+        candidates = load_learning_candidates(queue_file)
+        for item in self.learning_tree.get_children():
+            self.learning_tree.delete(item)
+        for candidate in candidates:
+            self.learning_tree.insert(
+                "",
+                END,
+                iid=candidate.get("id", ""),
+                values=(
+                    candidate.get("status", ""),
+                    candidate.get("task", ""),
+                    candidate.get("source", ""),
+                    candidate.get("created_utc", ""),
+                    candidate.get("rationale", "")[:220],
+                ),
+            )
+
+    def _apply_selected_learning(self) -> None:
+        selected = set(self.learning_tree.selection())
+        workspace = self.workspace_var.get()
+        memory_root = self.memory_root_var.get()
+        embedder_name = self.embedder_var.get()
+        model_path = self.model_path_var.get()
+
+        def worker() -> str:
+            if not selected:
+                raise ValueError("Select one or more learning candidates first.")
+            paths = default_memory_paths(workspace, memory_root)
+            queue_file = learning_queue_path(paths)
+            candidates = [
+                candidate
+                for candidate in load_learning_candidates(queue_file)
+                if candidate.get("id") in selected and candidate.get("status") == "pending"
+            ]
+            if not candidates:
+                raise ValueError("No pending selected learning candidates were found.")
+            pairs = [
+                CorrectionPair(
+                    task=str(candidate.get("task", "review_feedback")),
+                    input_text=str(candidate.get("input_text", "")),
+                    bad_output=str(candidate.get("bad_output", "")),
+                    corrected_output=str(candidate.get("corrected_output", "")),
+                    rationale=str(candidate.get("rationale", "")),
+                    tags=list(candidate.get("tags", [])),
+                )
+                for candidate in candidates
+            ]
+            memory = CorrectionMemory(paths.crystallized_store, self._build_embedder(embedder_name, model_path))
+            applied_ids = memory.add_pairs(pairs)
+            update_learning_candidate_status(queue_file, selected, "approved", applied_ids)
+            return f"Applied {len(applied_ids)} learning candidate(s) to {paths.crystallized_store}"
+
+        self._run_worker("Apply selected learning candidates", worker, lambda message: self._learning_action_done(message))
+
+    def _reject_selected_learning(self) -> None:
+        selected = set(self.learning_tree.selection())
+        queue_file = self._learning_queue_file()
+
+        def worker() -> str:
+            if not selected:
+                raise ValueError("Select one or more learning candidates first.")
+            changed = update_learning_candidate_status(queue_file, selected, "rejected")
+            return f"Rejected {changed} learning candidate(s)."
+
+        self._run_worker("Reject selected learning candidates", worker, lambda message: self._learning_action_done(message))
+
+    def _learning_action_done(self, message: str) -> str:
+        self._refresh_learning_queue()
+        self._refresh_memory_paths()
+        return message
 
     def _search_memory(self) -> None:
         query = self.search_query_var.get().strip()
@@ -868,6 +1104,13 @@ class LearningAgentApp(Tk):
         role = self.role_var.get().strip()
         justification = self._text(self.justification_text)
         out = self._out_path(f"approval_{state}.json")
+        auto_capture = self.auto_capture_feedback_var.get()
+        learning_enabled = self.learning_enabled_var.get()
+        require_learning_approval = self.require_learning_approval_var.get()
+        workspace = self.workspace_var.get()
+        memory_root = self.memory_root_var.get()
+        embedder_name = self.embedder_var.get()
+        model_path = self.model_path_var.get()
 
         def worker() -> str:
             if not review_path.exists():
@@ -875,7 +1118,56 @@ class LearningAgentApp(Tk):
             if not author or not role or not justification:
                 raise ValueError("Author ID, role, and justification are required for approval records.")
             create_approval_record(review_path, state, author, role, justification, out)
-            return f"Wrote approval record to {out.resolve()}"
+            learning_message = ""
+            if auto_capture and learning_enabled:
+                review_data = load_review(review_path)
+                actions = required_human_actions(review_data)
+                summary = summarize_review(review_path)
+                candidate = create_learning_candidate(
+                    task=f"review_{state}",
+                    input_text=json.dumps(
+                        {
+                            "review_path": str(review_path.resolve()),
+                            "state": state,
+                            "summary": {
+                                "decision_count": summary["decision_count"],
+                                "average_confidence": summary["average_confidence"],
+                                "compliance_failure_count": summary["compliance_failure_count"],
+                                "required_human_actions": actions,
+                            },
+                        },
+                        indent=2,
+                    ),
+                    bad_output="\n".join(f"{item['action']}: {item['context']}" for item in actions),
+                    corrected_output=f"Reviewer disposition: {state}\nRole: {role}\nJustification: {justification}",
+                    rationale=justification,
+                    tags=["ui_feedback", state, role],
+                    source="approval_workflow",
+                )
+                paths = default_memory_paths(workspace, memory_root)
+                if require_learning_approval:
+                    queue_file = learning_queue_path(paths)
+                    candidate_id = append_learning_candidate(queue_file, candidate)
+                    learning_message = f"\nCaptured learning candidate {candidate_id} in {queue_file}"
+                else:
+                    memory = CorrectionMemory(
+                        paths.crystallized_store,
+                        self._build_embedder(embedder_name, model_path),
+                    )
+                    ids = memory.add_pairs(
+                        [
+                            CorrectionPair(
+                                task=candidate["task"],
+                                input_text=candidate["input_text"],
+                                bad_output=candidate["bad_output"],
+                                corrected_output=candidate["corrected_output"],
+                                rationale=candidate["rationale"],
+                                tags=list(candidate["tags"]),
+                            )
+                        ]
+                    )
+                    learning_message = f"\nApplied learning candidate directly as {', '.join(ids)}"
+            return f"Wrote approval record to {out.resolve()}{learning_message}"
 
         self._run_worker("Record approval state", worker)
 

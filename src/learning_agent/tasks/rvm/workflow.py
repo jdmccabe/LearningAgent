@@ -41,7 +41,7 @@ def review_rvm(
     changed_requirement_ids: list[str] | None = None,
     model: ModelAdapter | None = None,
     policy: RvmPolicy | None = None,
-    engine: str = "default",
+    engine: str = "langgraph",
 ) -> dict[str, Any]:
     workflow = build_rvm_workflow(model=model, policy=policy)
     initial_state = {
@@ -51,9 +51,10 @@ def review_rvm(
     }
     if engine == "langgraph":
         return run_langgraph_workflow(workflow, initial_state)
-    if engine != "default":
+    if engine in {"default", "built-in", "builtin"}:
+        return workflow.run(initial_state)
+    else:
         raise ValueError(f"Unknown workflow engine '{engine}'.")
-    return workflow.run(initial_state)
 
 
 def _load_inputs(state: WorkflowState, context: dict[str, Any]) -> WorkflowState:

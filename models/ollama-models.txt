@@ -1,7 +1,8 @@
 # Repo-contained embedding model assets
 #
-# The GGUF file is committed through Git LFS so the repository can be cloned
-# with the embedding model asset available locally. Runtime embedding should
-# use the service-free hashing embedder or optional in-process GGUF embedder.
+# GGUF files are committed through Git LFS so the repository can be cloned
+# with embedding model assets available locally. The default llama-cpp runtime
+# uses the BGE model below because it loads directly through llama-cpp-python.
 
+default-llama-cpp-embedder -> models/llama-cpp/bge-small-en-v1.5-q4_k_m.gguf
 embeddinggemma:latest -> models/ollama/embeddinggemma/embeddinggemma.gguf

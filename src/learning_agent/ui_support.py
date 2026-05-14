@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import mean
 from typing import Any
+from uuid import uuid4
 
 from learning_agent.core.memory import MemoryPaths
 
@@ -181,6 +183,7 @@ def memory_inventory(paths: MemoryPaths) -> dict[str, Any]:
     files = {
         "reference_store": paths.reference_store,
         "crystallized_store": paths.crystallized_store,
+        "learning_queue": learning_queue_path(paths),
         "working_store": paths.working_store,
         "workspace_manifest": paths.workspace_manifest,
     }
@@ -199,11 +202,111 @@ def memory_inventory(paths: MemoryPaths) -> dict[str, Any]:
     }
 
 
+def format_memory_inventory(inventory: dict[str, Any]) -> str:
+    lines = [
+        f"Memory root: {inventory.get('root', '')}",
+        f"Workspace memory root: {inventory.get('workspace_root', '')}",
+        "",
+        "Stores:",
+    ]
+    stores = inventory.get("stores", {})
+    for name, details in stores.items():
+        label = name.replace("_", " ").title()
+        exists = "yes" if details.get("exists") else "no"
+        record_count = details.get("record_count")
+        record_text = "" if record_count is None else f", records: {record_count}"
+        lines.extend(
+            [
+                f"- {label}",
+                f"  Path: {details.get('path', '')}",
+                f"  Exists: {exists}, size: {details.get('size_bytes', 0)} bytes{record_text}",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def format_score(value: Any) -> str:
     try:
         return f"{float(value):.2f}"
     except (TypeError, ValueError):
         return "0.00"
+
+
+def learning_queue_path(paths: MemoryPaths) -> Path:
+    return paths.root / "crystallized" / "learning_queue.jsonl"
+
+
+def create_learning_candidate(
+    *,
+    task: str,
+    input_text: str,
+    bad_output: str,
+    corrected_output: str,
+    rationale: str,
+    tags: list[str] | None = None,
+    source: str = "ui",
+) -> dict[str, Any]:
+    now = datetime.now(UTC).replace(microsecond=0).isoformat()
+    return {
+        "id": f"learn-{uuid4().hex[:12]}",
+        "created_utc": now,
+        "updated_utc": now,
+        "status": "pending",
+        "source": source,
+        "task": task,
+        "input_text": input_text,
+        "bad_output": bad_output,
+        "corrected_output": corrected_output,
+        "rationale": rationale,
+        "tags": tags or [],
+        "applied_ids": [],
+    }
+
+
+def append_learning_candidate(path: str | Path, candidate: dict[str, Any]) -> str:
+    queue_path = Path(path)
+    queue_path.parent.mkdir(parents=True, exist_ok=True)
+    with queue_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(candidate) + "\n")
+    return str(candidate["id"])
+
+
+def load_learning_candidates(path: str | Path) -> list[dict[str, Any]]:
+    queue_path = Path(path)
+    if not queue_path.exists():
+        return []
+    candidates: list[dict[str, Any]] = []
+    for line in queue_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        candidates.append(json.loads(line))
+    return candidates
+
+
+def update_learning_candidate_status(
+    path: str | Path,
+    candidate_ids: set[str],
+    status: str,
+    applied_ids: list[str] | None = None,
+) -> int:
+    queue_path = Path(path)
+    candidates = load_learning_candidates(queue_path)
+    now = datetime.now(UTC).replace(microsecond=0).isoformat()
+    changed = 0
+    for candidate in candidates:
+        if candidate.get("id") not in candidate_ids:
+            continue
+        candidate["status"] = status
+        candidate["updated_utc"] = now
+        if applied_ids is not None:
+            candidate["applied_ids"] = applied_ids
+        changed += 1
+    queue_path.parent.mkdir(parents=True, exist_ok=True)
+    queue_path.write_text(
+        "".join(json.dumps(candidate) + "\n" for candidate in candidates),
+        encoding="utf-8",
+    )
+    return changed
 
 
 def _numeric_value(value: Any) -> float | None:

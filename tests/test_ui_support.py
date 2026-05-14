@@ -5,7 +5,20 @@ from pathlib import Path
 
 from learning_agent.core.documents import write_json
 from learning_agent.tasks.rvm.workflow import review_rvm
-from learning_agent.ui_support import artifact_inventory, format_score, required_human_actions, summarize_review
+from learning_agent.core.memory import default_memory_paths
+from learning_agent.ui_support import (
+    append_learning_candidate,
+    artifact_inventory,
+    create_learning_candidate,
+    format_memory_inventory,
+    format_score,
+    learning_queue_path,
+    load_learning_candidates,
+    memory_inventory,
+    required_human_actions,
+    summarize_review,
+    update_learning_candidate_status,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +69,48 @@ def test_artifact_inventory_is_recursive_and_score_formatting_is_stable() -> Non
     assert [item.name for item in inventory] == ["artifact.json"]
     assert format_score(0.456) == "0.46"
     assert format_score("bad") == "0.00"
+    _clean_scratch()
+
+
+def test_memory_inventory_formats_as_readable_list() -> None:
+    _clean_scratch()
+    paths = default_memory_paths(workspace=SCRATCH / "workspace", root=SCRATCH / "memory")
+    inventory = memory_inventory(paths)
+
+    text = format_memory_inventory(inventory)
+
+    assert "Memory root:" in text
+    assert "Stores:" in text
+    assert "- Reference Store" in text
+    assert "- Learning Queue" in text
+    assert "{" not in text
+    _clean_scratch()
+
+
+def test_learning_queue_lifecycle_is_file_backed() -> None:
+    _clean_scratch()
+    paths = default_memory_paths(workspace=SCRATCH / "workspace", root=SCRATCH / "memory")
+    queue = learning_queue_path(paths)
+    candidate = create_learning_candidate(
+        task="review_rejected",
+        input_text="REQ-1 draft decision",
+        bad_output="applicable",
+        corrected_output="not_applicable",
+        rationale="Architecture boundary excludes this function.",
+        tags=["ui_feedback"],
+        source="approval_workflow",
+    )
+
+    candidate_id = append_learning_candidate(queue, candidate)
+    loaded = load_learning_candidates(queue)
+    changed = update_learning_candidate_status(queue, {candidate_id}, "approved", ["vec-1"])
+    reloaded = load_learning_candidates(queue)
+
+    assert loaded[0]["status"] == "pending"
+    assert loaded[0]["source"] == "approval_workflow"
+    assert changed == 1
+    assert reloaded[0]["status"] == "approved"
+    assert reloaded[0]["applied_ids"] == ["vec-1"]
     _clean_scratch()
 
 

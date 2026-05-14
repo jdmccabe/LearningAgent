@@ -37,7 +37,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     review.add_argument("--project", nargs="+", required=True, help="Project context files.")
     review.add_argument("--changed", nargs="*", default=[], help="Changed requirement IDs for impact analysis.")
     review.add_argument("--out", required=True, help="Output JSON file.")
-    review.add_argument("--engine", choices=["default", "langgraph"], default="default")
+    review.add_argument("--engine", choices=["langgraph", "built-in"], default="langgraph")
 
     evaluate = subcommands.add_parser("evaluate-rvm", help="Evaluate predictions against a good RVM CSV.")
     evaluate.add_argument("--gold", required=True, help="Known-good RVM CSV.")
@@ -312,8 +312,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         return
 
 def _add_embedding_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--embedder", choices=["hashing", "llama-cpp"], default="hashing")
-    parser.add_argument("--model-path", default="models/ollama/embeddinggemma/embeddinggemma.gguf")
+    parser.add_argument("--embedder", choices=["llama-cpp", "hashing"], default="llama-cpp")
+    parser.add_argument("--model-path", default="models/llama-cpp/bge-small-en-v1.5-q4_k_m.gguf")
 
 
 def _build_embedder(args: argparse.Namespace):
