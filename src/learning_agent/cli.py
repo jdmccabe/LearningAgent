@@ -38,6 +38,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     review.add_argument("--changed", nargs="*", default=[], help="Changed requirement IDs for impact analysis.")
     review.add_argument("--out", required=True, help="Output JSON file.")
     review.add_argument("--engine", choices=["langgraph", "built-in"], default="langgraph")
+    review.add_argument("--workspace", default=".", help="Workspace path for memory isolation.")
+    review.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
+    review.add_argument("--no-memory", action="store_true", help="Run without persistent memory retrieval.")
+    review.add_argument("--no-index-memory", action="store_true", help="Use existing memory but do not index inputs first.")
+    _add_embedding_args(review)
 
     evaluate = subcommands.add_parser("evaluate-rvm", help="Evaluate predictions against a good RVM CSV.")
     evaluate.add_argument("--gold", required=True, help="Known-good RVM CSV.")
@@ -80,21 +85,28 @@ def main(argv: Sequence[str] | None = None) -> None:
     learn_good.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
     _add_embedding_args(learn_good)
 
-    index_ref = subcommands.add_parser("index-reference", help="Index reference documents into a JSONL vector store.")
+    index_ref = subcommands.add_parser("index-reference", help="Index reference documents into hybrid memory.")
     index_ref.add_argument("--docs", nargs="+", required=True, help="Reference documents to index.")
-    index_ref.add_argument("--store", help="Vector store JSONL path.")
+    index_ref.add_argument("--store", help="Hybrid memory SQLite path.")
     index_ref.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
     _add_embedding_args(index_ref)
 
     search_ref = subcommands.add_parser("search-reference", help="Search indexed reference documents.")
     search_ref.add_argument("--query", required=True)
-    search_ref.add_argument("--store", help="Vector store JSONL path.")
+    search_ref.add_argument("--store", help="Hybrid memory SQLite path.")
     search_ref.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
     search_ref.add_argument("--top-k", type=int, default=5)
+    search_ref.add_argument("--mode", choices=["semantic", "text"], default="semantic")
     _add_embedding_args(search_ref)
 
+    get_req = subcommands.add_parser("get-requirement", help="Resolve exact canonical requirement text by ID.")
+    get_req.add_argument("--id", required=True, help="Requirement ID to resolve.")
+    get_req.add_argument("--store", help="Hybrid memory SQLite path.")
+    get_req.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
+    _add_embedding_args(get_req)
+
     add_correction = subcommands.add_parser("add-correction", help="Add an error-correction pair.")
-    add_correction.add_argument("--store", help="Vector store JSONL path.")
+    add_correction.add_argument("--store", help="Hybrid memory SQLite path.")
     add_correction.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
     add_correction.add_argument("--task", required=True)
     add_correction.add_argument("--input", required=True)
@@ -106,9 +118,10 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     search_correction = subcommands.add_parser("search-corrections", help="Search stored correction pairs.")
     search_correction.add_argument("--query", required=True)
-    search_correction.add_argument("--store", help="Vector store JSONL path.")
+    search_correction.add_argument("--store", help="Hybrid memory SQLite path.")
     search_correction.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
     search_correction.add_argument("--top-k", type=int, default=5)
+    search_correction.add_argument("--mode", choices=["semantic", "text"], default="semantic")
     _add_embedding_args(search_correction)
 
     index_project = subcommands.add_parser("index-project", help="Index project details into workspace-scoped working memory.")
@@ -122,6 +135,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     search_project.add_argument("--workspace", default=".", help="Workspace path for memory isolation.")
     search_project.add_argument("--memory-root", help="Persistent memory root. Defaults to .learning_agent.")
     search_project.add_argument("--top-k", type=int, default=5)
+    search_project.add_argument("--mode", choices=["semantic", "text"], default="semantic")
     _add_embedding_args(search_project)
 
     memory_paths = subcommands.add_parser("memory-paths", help="Show persistent memory paths for this workspace.")
@@ -158,7 +172,17 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(f"Wrote demo review to {Path(args.out).resolve()}")
         return
     if args.command == "review-rvm":
-        result = review_rvm(args.standards, args.project, args.changed, engine=args.engine)
+        result = review_rvm(
+            args.standards,
+            args.project,
+            args.changed,
+            engine=args.engine,
+            workspace=args.workspace,
+            memory_root=args.memory_root,
+            embedder=_build_embedder(args),
+            use_memory=not args.no_memory,
+            index_memory=not args.no_index_memory,
+        )
         write_json(args.out, result["result"])
         print(f"Wrote review to {Path(args.out).resolve()}")
         return
@@ -228,12 +252,24 @@ def main(argv: Sequence[str] | None = None) -> None:
         store = args.store or paths.reference_store
         memory = ReferenceMemory(store, _build_embedder(args))
         ids = memory.index_files(args.docs)
-        print(f"Indexed {len(ids)} reference chunk(s) into {Path(store).resolve()}")
+        print(f"Indexed {len(ids)} reference record(s) into {Path(store).resolve()}")
         return
     if args.command == "search-reference":
         paths = default_memory_paths(root=args.memory_root)
         memory = ReferenceMemory(args.store or paths.reference_store, _build_embedder(args))
-        _print_results([item.to_dict(include_embedding=False) for item in memory.search(args.query, args.top_k)])
+        results = memory.search_text(args.query, args.top_k) if args.mode == "text" else memory.search(args.query, args.top_k)
+        _print_results([item.to_dict(include_embedding=False) for item in results])
+        return
+    if args.command == "get-requirement":
+        paths = default_memory_paths(root=args.memory_root)
+        memory = ReferenceMemory(args.store or paths.reference_store, _build_embedder(args))
+        record = memory.get_requirement(args.id)
+        if record is None:
+            _print_results([])
+        else:
+            data = record.to_dict()
+            data.pop("embedding", None)
+            _print_results([{"record": data}])
         return
     if args.command == "add-correction":
         paths = default_memory_paths(root=args.memory_root)
@@ -256,16 +292,18 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.command == "search-corrections":
         paths = default_memory_paths(root=args.memory_root)
         memory = CorrectionMemory(args.store or paths.crystallized_store, _build_embedder(args))
-        _print_results([item.to_dict(include_embedding=False) for item in memory.search(args.query, args.top_k)])
+        results = memory.search_text(args.query, args.top_k) if args.mode == "text" else memory.search(args.query, args.top_k)
+        _print_results([item.to_dict(include_embedding=False) for item in results])
         return
     if args.command == "index-project":
         memory = WorkspaceMemory(args.workspace, args.memory_root, _build_embedder(args))
         ids = memory.index_project_files(args.docs)
-        print(f"Indexed {len(ids)} project chunk(s) into {memory.paths.working_store}")
+        print(f"Indexed {len(ids)} project record(s) into {memory.paths.working_store}")
         return
     if args.command == "search-project":
         memory = WorkspaceMemory(args.workspace, args.memory_root, _build_embedder(args))
-        _print_results([item.to_dict(include_embedding=False) for item in memory.search(args.query, args.top_k)])
+        results = memory.search_text(args.query, args.top_k) if args.mode == "text" else memory.search(args.query, args.top_k)
+        _print_results([item.to_dict(include_embedding=False) for item in results])
         return
     if args.command == "memory-paths":
         paths = default_memory_paths(args.workspace, args.memory_root)
@@ -273,10 +311,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             [
                 {
                     "root": str(paths.root),
-                    "reference_store": str(paths.reference_store),
-                    "crystallized_store": str(paths.crystallized_store),
+                    "shared_canonical_store": str(paths.reference_store),
                     "workspace_root": str(paths.workspace_root),
-                    "working_store": str(paths.working_store),
+                    "workspace_canonical_store": str(paths.working_store),
                     "workspace_manifest": str(paths.workspace_manifest),
                 }
             ]

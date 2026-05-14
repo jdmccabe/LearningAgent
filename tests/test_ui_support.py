@@ -81,7 +81,7 @@ def test_memory_inventory_formats_as_readable_list() -> None:
 
     assert "Memory root:" in text
     assert "Stores:" in text
-    assert "- Reference Store" in text
+    assert "- Shared Canonical Store" in text
     assert "- Learning Queue" in text
     assert "{" not in text
     _clean_scratch()

@@ -3,7 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from learning_agent.core.embeddings import HashingEmbedder, LlamaCppEmbedder
-from learning_agent.core.memory import CorrectionMemory, CorrectionPair, ReferenceMemory, WorkspaceMemory
+from learning_agent.core.memory import (
+    CorrectionMemory,
+    CorrectionPair,
+    GraphRelationship,
+    HybridMemoryStore,
+    ReferenceMemory,
+    WorkspaceMemory,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,21 +22,28 @@ def test_reference_memory_indexes_and_searches() -> None:
     doc = SCRATCH / "reference.txt"
     doc.parent.mkdir(parents=True, exist_ok=True)
     doc.write_text("REQ-1: The system shall encrypt wireless links.\n", encoding="utf-8")
-    memory = ReferenceMemory(SCRATCH / "reference.jsonl", HashingEmbedder(dimensions=64))
+    memory = ReferenceMemory(SCRATCH / "memory.sqlite", HashingEmbedder(dimensions=64))
 
     ids = memory.index_files([doc])
     results = memory.search("encrypt wireless communication", top_k=1)
+    exact = memory.search_text("system shall encrypt wireless", top_k=1)
+    by_id = memory.get_requirement("REQ-1")
 
     assert ids
-    assert results[0].record.metadata["kind"] == "reference"
+    assert results[0].record.metadata["kind"] in {"reference", "requirement"}
     assert "encrypt" in results[0].record.text
+    assert exact[0].record.text == "The system shall encrypt wireless links."
+    assert exact[0].record.metadata["requirement_id"] == "REQ-1"
+    assert exact[0].record.metadata["source_hash"]
+    assert by_id is not None
+    assert by_id.text == "The system shall encrypt wireless links."
     _clean_scratch()
 
 
 def test_correction_memory_indexes_and_searches() -> None:
     _clean_scratch()
     SCRATCH.mkdir(parents=True, exist_ok=True)
-    memory = CorrectionMemory(SCRATCH / "corrections.jsonl", HashingEmbedder(dimensions=64))
+    memory = CorrectionMemory(SCRATCH / "memory.sqlite", HashingEmbedder(dimensions=64))
     memory.add_pairs(
         [
             CorrectionPair(
@@ -43,9 +57,11 @@ def test_correction_memory_indexes_and_searches() -> None:
     )
 
     results = memory.search("wireless not applicable", top_k=1)
+    exact = memory.search_text("Project has no wireless", top_k=1)
 
     assert results[0].record.metadata["kind"] == "correction"
     assert results[0].record.metadata["corrected_output"] == "not_applicable"
+    assert exact[0].record.metadata["task"] == "applicability"
     _clean_scratch()
 
 
@@ -68,6 +84,42 @@ def test_workspace_memory_is_scoped_by_workspace() -> None:
     assert memory_a.paths.working_store != memory_b.paths.working_store
     assert "battery" in memory_a.search("battery radio", top_k=1)[0].record.text
     assert "software-only" in memory_b.search("software batch", top_k=1)[0].record.text
+    _clean_scratch()
+
+
+def test_hybrid_memory_stores_graph_relationships() -> None:
+    _clean_scratch()
+    store = HybridMemoryStore(SCRATCH / "memory.sqlite", HashingEmbedder(dimensions=64))
+
+    added = store.add_relationships(
+        [
+            GraphRelationship(
+                source_id="REQ-1",
+                target_id="REQ-1.1",
+                kind="decomposes_to",
+                status="approved",
+                metadata={"reason": "explicit parent field"},
+            ),
+            GraphRelationship(
+                source_id="REQ-1",
+                target_id="REQ-2",
+                kind="related_to",
+                status="candidate",
+            ),
+        ]
+    )
+    approved = store.relationships(source_id="REQ-1", status="approved")
+
+    assert added == 2
+    assert approved == [
+        GraphRelationship(
+            source_id="REQ-1",
+            target_id="REQ-1.1",
+            kind="decomposes_to",
+            status="approved",
+            metadata={"reason": "explicit parent field"},
+        )
+    ]
     _clean_scratch()
 
 

@@ -722,6 +722,10 @@ class LearningAgentApp(Tk):
         projects = list(self.project_list.items)
         changed_ids = self._changed_ids()
         engine = self.engine_var.get()
+        workspace = self.workspace_var.get()
+        memory_root = self.memory_root_var.get()
+        embedder_name = self.embedder_var.get()
+        model_path = self.model_path_var.get()
         review_out = self._out_path("review.json")
         compliance_out = self._out_path("compliance_report.json")
 
@@ -730,7 +734,17 @@ class LearningAgentApp(Tk):
                 raise ValueError("Add at least one standard or requirements document.")
             if not projects:
                 raise ValueError("Add at least one project context document.")
-            result = review_rvm(standards, projects, changed_ids, engine=engine)
+            result = review_rvm(
+                standards,
+                projects,
+                changed_ids,
+                engine=engine,
+                workspace=workspace,
+                memory_root=memory_root,
+                embedder=self._build_embedder(embedder_name, model_path),
+                use_memory=True,
+                index_memory=True,
+            )
             write_json(review_out, result["result"])
             write_json(compliance_out, result["result"].get("compliance_report", {}))
             return {"review": review_out, "compliance": compliance_out}
@@ -863,7 +877,7 @@ class LearningAgentApp(Tk):
             paths = default_memory_paths(workspace, memory_root)
             memory = ReferenceMemory(paths.reference_store, self._build_embedder(embedder_name, model_path))
             ids = memory.index_files(standards)
-            return f"Indexed {len(ids)} reference chunk(s) into {paths.reference_store}"
+            return f"Indexed {len(ids)} reference record(s) into {paths.reference_store}"
 
         self._run_worker("Index reference documents", worker)
 
@@ -879,7 +893,7 @@ class LearningAgentApp(Tk):
                 raise ValueError("Add project context documents first.")
             memory = WorkspaceMemory(workspace, memory_root, self._build_embedder(embedder_name, model_path))
             ids = memory.index_project_files(projects)
-            return f"Indexed {len(ids)} project chunk(s) into {memory.paths.working_store}"
+            return f"Indexed {len(ids)} project record(s) into {memory.paths.working_store}"
 
         self._run_worker("Index project working memory", worker)
 
@@ -938,20 +952,19 @@ class LearningAgentApp(Tk):
                 report_out,
                 {
                     "known_good_rvm": gold_path,
-                    "reference_chunks_indexed": len(reference_ids),
-                    "project_chunks_indexed": len(project_ids),
+                    "reference_records_indexed": len(reference_ids),
+                    "project_records_indexed": len(project_ids),
                     "crystallized_examples": len(correction_ids),
                     "improvements_written": str(improvements_out.resolve()) if improvement_written else "",
                     "memory": {
-                        "reference_store": str(paths.reference_store),
-                        "crystallized_store": str(paths.crystallized_store),
-                        "working_store": str(paths.working_store),
+                        "shared_canonical_store": str(paths.reference_store),
+                        "workspace_canonical_store": str(paths.working_store),
                     },
                 },
             )
             return (
-                f"Initial optimization complete. Indexed {len(reference_ids)} reference chunk(s), "
-                f"{len(project_ids)} project chunk(s), and crystallized {len(correction_ids)} known-good example(s). "
+                f"Initial optimization complete. Indexed {len(reference_ids)} reference record(s), "
+                f"{len(project_ids)} project record(s), and crystallized {len(correction_ids)} known-good example(s). "
                 f"Wrote report to {report_out.resolve()}"
             )
 

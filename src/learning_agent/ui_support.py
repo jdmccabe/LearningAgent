@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import UTC, datetime
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -181,10 +182,9 @@ def required_human_actions(review_data: dict[str, Any]) -> list[dict[str, str]]:
 
 def memory_inventory(paths: MemoryPaths) -> dict[str, Any]:
     files = {
-        "reference_store": paths.reference_store,
-        "crystallized_store": paths.crystallized_store,
+        "shared_canonical_store": paths.reference_store,
         "learning_queue": learning_queue_path(paths),
-        "working_store": paths.working_store,
+        "workspace_canonical_store": paths.working_store,
         "workspace_manifest": paths.workspace_manifest,
     }
     return {
@@ -195,7 +195,7 @@ def memory_inventory(paths: MemoryPaths) -> dict[str, Any]:
                 "path": str(path),
                 "exists": path.exists(),
                 "size_bytes": path.stat().st_size if path.exists() else 0,
-                "record_count": _count_jsonl(path) if path.suffix == ".jsonl" else None,
+                "record_count": _count_records(path),
             }
             for name, path in files.items()
         },
@@ -379,6 +379,21 @@ def _count_jsonl(path: Path) -> int:
     if not path.exists():
         return 0
     return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
+def _count_records(path: Path) -> int | None:
+    if not path.exists():
+        return 0
+    if path.suffix == ".jsonl":
+        return _count_jsonl(path)
+    if path.suffix not in {".sqlite", ".db"}:
+        return None
+    try:
+        with sqlite3.connect(path) as conn:
+            row = conn.execute("SELECT COUNT(*) FROM canonical_records").fetchone()
+    except sqlite3.DatabaseError:
+        return None
+    return int(row[0])
 
 
 def _format_mtime(timestamp: float) -> str:

@@ -50,8 +50,11 @@ Analyze your own files:
 python -m learning_agent.cli review-rvm `
   --standards examples/standards.csv `
   --project examples/project.txt `
+  --workspace . `
   --out out/review.json
 ```
+
+Drafting uses hybrid memory by default: current standards are indexed into shared canonical/reference memory, project context is indexed into workspace memory, requirements are resolved back to canonical records, crystallized corrections are searched for drafting hints, and graph relationships are persisted for trace and impact analysis. Add `--no-memory` for a stateless diagnostic run or `--no-index-memory` to retrieve from pre-curated memory without adding the current inputs.
 
 Use the deterministic fallback runner if you explicitly do not want LangGraph execution:
 
@@ -158,6 +161,12 @@ python -m learning_agent.cli index-reference `
 
 python -m learning_agent.cli search-reference `
   --query "wireless encryption requirement"
+
+python -m learning_agent.cli search-reference `
+  --query "The system shall encrypt wireless links" `
+  --mode text
+
+python -m learning_agent.cli get-requirement --id STD-002
 ```
 
 Store and search reviewer correction pairs:
@@ -232,12 +241,12 @@ flowchart TD
     D["Known-good RVMs"] --> E["Evaluation harness"]
 
     B --> F["Requirement objects"]
-    B --> G["Reference chunks"]
-    G --> H["Reference memory<br/>JSONL vector store"]
+    B --> G["Canonical documents and chunks<br/>exact text, anchors, hashes"]
+    G --> H["Hybrid memory<br/>SQLite canonical store, FTS, vectors"]
     I["Reviewer dispositions"] --> X["Learning queue<br/>pending feedback candidates"]
-    X --> J["Correction memory<br/>approved error-correction pairs"]
+    X --> J["Crystallized memory<br/>approved correction records"]
 
-    H --> K["Retrieval context"]
+    H --> K["Candidate retrieval context"]
     J --> K
     F --> L["LangGraph or built-in workflow"]
     K --> L
@@ -267,10 +276,9 @@ Generic core:
 - `learning_agent.core.langgraph_workflow`: default LangGraph execution adapter
 - `learning_agent.core.models`: model adapter interface plus offline adapters
 - `learning_agent.core.documents`: document loading and chunking
-- `learning_agent.core.graph`: small property graph for traceability and impact analysis
+- `learning_agent.core.graph`: property graph for traceability and impact analysis
 - `learning_agent.core.embeddings`: hashing and in-process GGUF embedding adapters
-- `learning_agent.core.vector_store`: JSONL vector store
-- `learning_agent.core.memory`: reference, workspace, and correction-pair memory
+- `learning_agent.core.memory`: hybrid canonical, full-text, vector, and graph-backed memory
 - `learning_agent.core.evaluation`: reusable classification/link/field metrics
 
 Requirements task pack:
@@ -281,12 +289,18 @@ Requirements task pack:
 - `learning_agent.tasks.rvm.evaluation`: RVM-specific scoring
 - `learning_agent.tasks.rvm.compliance`: deterministic aerospace RVM compliance checks
 
-Memory tiers:
+Memory structure:
 
+- Canonical memory: exact source documents, chunks, requirements, source anchors, hashes, and structured metadata.
+- Full-text memory: deterministic phrase, identifier, acronym, and quoted-text search over canonical records.
+- Vector memory: semantic discovery over canonical chunks and correction examples; vector hits are candidates only.
+- Relationship graph memory: explicit relationships for traceability, coverage, impact analysis, waivers, and candidate links.
 - Reference memory: persistent reusable requirements/reference documents uploaded by the user.
-- Crystallized memory: persistent good examples, reviewer corrections, and learned improvements.
+- Crystallized memory: persistent good examples, reviewer corrections, and learned improvements, stored as canonical correction records.
 - Learning queue: pending, approved, and rejected feedback candidates captured from review and approval actions before they are crystallized.
 - Workspace working memory: project-specific context isolated by workspace path so unrelated projects do not contaminate each other.
+
+Vector retrieval is not the memory of record. Requirement text and evidence quotes must be retrieved word-for-word from canonical records by ID, source anchor, or full-text search. Semantic retrieval is useful for finding likely context, similar prior corrections, and candidate procedure references, but selected hits must resolve to exact canonical records before they can support RVM output.
 
 ## Aerospace Compliance Guardrails
 

@@ -32,7 +32,10 @@ class SearchResult:
 
 
 class JsonlVectorStore:
-    """Small persistent vector store for reference docs and correction pairs."""
+    """Legacy small JSONL vector helper.
+
+    Production memory uses ``HybridMemoryStore`` in ``learning_agent.core.memory``.
+    """
 
     def __init__(self, path: str | Path, embedder: Embedder) -> None:
         self.path = Path(path)

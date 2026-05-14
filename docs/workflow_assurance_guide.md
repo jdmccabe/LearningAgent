@@ -129,6 +129,40 @@ Show actual paths:
 python -m learning_agent.cli memory-paths --workspace .
 ```
 
+### Memory Architecture
+
+LearningAgent uses hybrid memory. No single retrieval mechanism is treated as sufficient for every workflow stage.
+
+Default canonical database:
+
+```text
+.learning_agent/memory.sqlite
+```
+
+Workspace-scoped canonical database:
+
+```text
+.learning_agent/workspaces/<workspace-name>-<hash>/memory.sqlite
+```
+
+The memory system has four retrieval layers:
+
+| Layer | Purpose | Used for | Compliance status |
+| --- | --- | --- | --- |
+| Canonical records | Exact source-of-truth text, IDs, document anchors, hashes, revisions, and structured metadata | Requirement lookup, exact evidence citation, audit reconstruction | May support evidence when cited by exact source anchor and hash |
+| Full-text index | Deterministic phrase, identifier, acronym, and quoted-text lookup | Word-perfect requirement and procedure retrieval | Retrieval support; selected records must still be cited exactly |
+| Vector index | Semantic discovery over canonical chunks and correction examples | Finding related context, similar prior corrections, possible procedures, and candidate evidence | Not evidence by itself |
+| Relationship graph | Directed relationships between requirements, procedures, artifacts, waivers, corrections, and generated decisions | Traceability, impact analysis, coverage review, approved-vs-candidate separation | Approved graph edges may support trace/impact evidence |
+
+Design intent:
+
+- Exact text is stored once in canonical tables. Vector records store embeddings and pointers back to canonical records.
+- A vector search result is only a candidate. Agents must resolve candidates to canonical IDs before quoting or citing them.
+- Requirement text must be retrievable word-for-word by requirement ID, source anchor, or full-text phrase search.
+- Traceability and impact analysis use graph relationships, not vector similarity. Semantic similarity can create candidate links, but approved trace links must be explicit graph edges.
+- Workspace working memory is physically isolated in a workspace database. Shared reference and crystallized memory remain in the root database.
+- Compliance audit reads persisted structured RVM records and canonical citations. It must not depend on vector scores, learned examples, or model confidence.
+
 ### Reference Memory
 
 Purpose: persistent reusable standards, common requirements documents, procedure references, architecture references, and other user-uploaded reference documents.
@@ -136,7 +170,7 @@ Purpose: persistent reusable standards, common requirements documents, procedure
 Default location:
 
 ```text
-.learning_agent/reference/reference_memory.jsonl
+.learning_agent/memory.sqlite
 ```
 
 Create/update:
@@ -149,20 +183,13 @@ Search:
 
 ```powershell
 python -m learning_agent.cli search-reference --query "wireless telemetry encryption"
+python -m learning_agent.cli search-reference --query "The system shall encrypt wireless links" --mode text
+python -m learning_agent.cli get-requirement --id STD-002
 ```
 
-Format: JSONL vector records with fields:
+Format: canonical document and chunk records with exact text, source path, source hash, line/table anchors, optional revision metadata, FTS index rows, and vector embeddings that point back to canonical chunk IDs.
 
-- `id`
-- `text`
-- `embedding`
-- `metadata.kind = "reference"`
-- `metadata.source`
-- `metadata.start_line`
-- `metadata.end_line`
-- `metadata.embedder`
-
-Interpretation: reference memory is retrieval support. It is not compliance evidence unless a selected RVM entry cites the exact document, revision, section, paragraph, artifact, or hash.
+Interpretation: reference memory supports discovery and citation lookup. It is not compliance evidence unless a selected RVM entry cites the exact canonical document, revision, section, paragraph, row, artifact, or hash.
 
 ### Crystallized Memory
 
@@ -171,7 +198,7 @@ Purpose: persistent learned examples from known-good RVMs and human corrections.
 Default location:
 
 ```text
-.learning_agent/crystallized/learned_corrections.jsonl
+.learning_agent/memory.sqlite
 ```
 
 Seed from known-good RVMs:
@@ -193,7 +220,7 @@ python -m learning_agent.cli add-correction `
   --rationale "No wireless telemetry hardware per SYS-ARCH-01 Rev B Sec 2.1."
 ```
 
-Interpretation: crystallized memory improves future drafting and triage. It does not change approved worker-agent definitions or compliance rules automatically.
+Interpretation: crystallized memory improves future drafting and triage. Corrections are stored as canonical learning records, indexed by full text and vector similarity, and linked to source requirements when available. It does not change approved worker-agent definitions or compliance rules automatically.
 
 ### Learning Queue
 
@@ -229,7 +256,7 @@ Purpose: project-specific facts and context.
 Default location:
 
 ```text
-.learning_agent/workspaces/<workspace-name>-<hash>/working_memory.jsonl
+.learning_agent/workspaces/<workspace-name>-<hash>/memory.sqlite
 ```
 
 Workspace manifest:
@@ -252,9 +279,27 @@ Search project memory:
 python -m learning_agent.cli search-project `
   --query "system boundary wireless telemetry" `
   --workspace .
+
+python -m learning_agent.cli search-project `
+  --query "No wireless telemetry hardware" `
+  --workspace . `
+  --mode text
 ```
 
-Compliance justification: working memory is isolated by workspace path to avoid contaminating one project with another project's architecture, assumptions, waivers, or evidence.
+Compliance justification: working memory is isolated by workspace path to avoid contaminating one project with another project's architecture, assumptions, waivers, or evidence. Project facts, exclusions, waivers, and evidence anchors should be retrieved from the workspace canonical database by exact ID/phrase when possible, with vector search used only to find candidates.
+
+### Retrieval Responsibilities By Workflow Stage
+
+| Stage | Primary retrieval | Secondary retrieval | Notes |
+| --- | --- | --- | --- |
+| Document ingestion | Canonical source records | None | Preserve exact IDs, text, line/table anchors, and hashes. Do not infer engineering meaning. |
+| Requirement lookup | Requirement ID and FTS | Vector search for discovery | Word-perfect requirement text must come from canonical records. |
+| Applicability analysis | Workspace canonical records and FTS | Vector search over workspace/reference chunks | Not-applicable decisions require exact architecture, boundary, allocation, contract, or waiver anchors. |
+| Verification planning | Procedure/evidence canonical records and FTS | Vector search over reference procedures | Final procedure references must identify exact document anchors. |
+| Traceability | Relationship graph | FTS/ID lookup to resolve endpoints | Parent/child/verification links must be explicit or human-approved graph edges. |
+| Impact analysis | Relationship graph traversal | None for approved impact; vector only for candidate review links | Approved and candidate impacts must remain separate. |
+| Compliance audit | Persisted RVM fields and canonical citations | None | Audit must fail closed and must not depend on retrieval confidence. |
+| Continuous improvement | Crystallized correction records | Vector search for similar examples | Learning creates examples and proposals, not automatic policy changes. |
 
 ## Initial Training Stage
 
@@ -284,10 +329,10 @@ Generated artifacts:
 
 | Artifact | Default Location | Meaning |
 | --- | --- | --- |
-| Learned examples | `.learning_agent/crystallized/learned_corrections.jsonl` | Persistent known-good decisions and rationale |
+| Learned examples | `.learning_agent/memory.sqlite` | Persistent known-good decisions and rationale |
 | Learning queue | `.learning_agent/crystallized/learning_queue.jsonl` | Pending, approved, and rejected feedback candidates |
-| Reference memory | `.learning_agent/reference/reference_memory.jsonl` | Searchable reusable source material |
-| UI optimization report | `out/ui/initial_optimization_report.json` | Counts of indexed reference chunks, project chunks, crystallized examples, and memory store locations |
+| Reference memory | `.learning_agent/memory.sqlite` | Searchable reusable source material |
+| UI optimization report | `out/ui/initial_optimization_report.json` | Counts of indexed reference records, project records, crystallized examples, and memory store locations |
 | Optional evaluation output | User-provided `--out` path | Performance metrics against good RVMs |
 
 Compliance justification: training data is not trusted blindly. It becomes retrievable examples and benchmark evidence. Any policy or agent-definition change must be promoted through a proposal and review process.
@@ -311,8 +356,12 @@ python -m learning_agent.cli review-rvm `
   --standards standard_requirements.xlsx `
   --project project_architecture.md system_boundary.reqif `
   --changed HL-SYS-REQ-402 `
+  --workspace . `
+  --memory-root .learning_agent `
   --out out/review.json
 ```
+
+By default, production drafting indexes the supplied standards into shared canonical/reference memory, indexes project documents into workspace memory, resolves parsed requirements back to canonical requirement records, searches workspace memory for applicability evidence, searches crystallized correction memory for similar reviewed decisions, and persists approved/candidate graph relationships. Use `--no-memory` only for an intentionally stateless diagnostic run. Use `--no-index-memory` when the memory stores have already been curated and the run should retrieve from them without adding current inputs.
 
 Primary artifact:
 
@@ -323,6 +372,7 @@ out/review.json
 Important top-level fields:
 
 - `verification_artifact`: run metadata, agent definitions, input paths, counts, compliance summary
+- `verification_artifact.memory`: memory paths, workspace ID, indexed record counts, and canonical requirement hit counts
 - `decisions`: generated RVM decisions
 - `impacts`: downstream impact reports for changed requirements
 - `audit_findings`: workflow-level warnings
