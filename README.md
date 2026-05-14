@@ -11,6 +11,7 @@ LearningAgent is an offline-first, model-agnostic workflow framework for reviewi
 The framework does not require an API key. By default it uses deterministic local heuristics and file-backed memory. It does not require any local network service.
 
 For the full operational and compliance description, see [Workflow Assurance Guide](docs/workflow_assurance_guide.md).
+For the local desktop control surface, see [Desktop UI Guide](docs/desktop_ui.md).
 
 ## Quick Start
 
@@ -18,6 +19,12 @@ Run the demo:
 
 ```powershell
 python -m learning_agent.cli demo
+```
+
+Launch the desktop UI:
+
+```powershell
+python -m learning_agent.ui
 ```
 
 Analyze your own files:
@@ -183,6 +190,8 @@ Everything is exposed through `python -m learning_agent.cli`, so it can be run f
 - VS Code terminals, including GitHub Copilot-assisted workflows
 - Claude Code terminals
 - PowerShell or any shell that can run Python
+
+For interactive operation, run the desktop UI with `python -m learning_agent.ui` or the `learning-agent-ui` console script after installation. It is a local desktop process, not a hosted web interface.
 
 ## File Formats
 
