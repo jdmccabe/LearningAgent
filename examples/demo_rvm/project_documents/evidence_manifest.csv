@@ -1,0 +1,13 @@
+artifact_id,file_name,document_reference,sha256,artifact_type,owner,status
+EV-RS-010,ATGSD-HAZ-001_RevE.pdf,"ATGSD-HAZ-001 Rev E",0f6f7d2737d4ebca8d4e481ba7b49b9b0c2a0a9157a0bc97b9a57ef559102010,hazard_report,Systems Safety,released
+EV-STR-020,ATGSD-CALC-020_RevB.pdf,"ATGSD-CALC-020 Rev B",f62097d337b59d42e6cd61f59d438ef43a7cb777c0036dcf9c23e6942a7fbd92,analysis_report,Structures,released
+EV-STR-021,ATGSD-NDE-REC-021.xlsx,"Weld and NDE record set",6e33ff0d2a8b8dcf6af534a50d00de8c9b73bd3e4f8d8630e07758ec7c2a1a65,inspection_record,Quality,released
+EV-ELEC-030,ATGSD-EL-INSP-030.pdf,"ATP-ELEC-030 Run 2",61b74dcd0d2504df3f570918f8620bc3bc20f3f91d79da5f66cb5ecf368184b0,test_report,Electrical,released
+EV-WIRE-040,ATGSD-HARNESS-IR-040.log,"ATP-WIRE-040 Run 1",c6aeebdb55c9d2bc2ea437d1d78dbb1f74f112dc0b7b5b72078f808467980b25,test_log,Electrical,released
+EV-MAT-050,ATGSD-MAT-SCREEN-050.xlsx,"Materials compatibility matrix",60ad9691a9bd728c9e06a5960293600bb4ef72b2e237979d09917b21284bb735,inspection_record,Materials,released
+EV-OXY-060,ATGSD-CLEAN-ISO14952-001.pdf,"Oxygen cleaning certification",78ad3143d0f4f6803c03551f729c54c06192dbac6c2602b2810a09ec8bb7af9c,certificate,Propulsion GSE,released
+EV-PRES-070,ATGSD-PRESS-TEST-070.log,"ATP-PRES-070 Hydro and leak check",69a1e47875df05c6b1f0f7dddf1a9da14e18d83f0e6d9e14546ec3319c750ac0,test_log,Pressure Systems,released
+EV-GSE-080,ATGSD-GSE-INSP-080.pdf,"ATP-GSE-080 Acceptance inspection",c30f2d6c108f915c95659ec92ac2d88c271a73bd91bf6a8a8dbd69e3491742aa,inspection_record,GSE,released
+EV-PROC-100,ATGSD-MP-CERTS-100.zip,"Heat treat coating plating cert package",a4956d2142fe813397eec18a646b3020bd73d818df18d9e3b86b754394bd2022,certification_package,Materials,released
+EV-PACK-120,ATGSD-PACK-INSP-120.pdf,"Packaging and FOD inspection",adf066a20f139a05ad0de295f912c5bdf7248d2adc3653ff9965984eab45b289,inspection_record,Logistics,released
+

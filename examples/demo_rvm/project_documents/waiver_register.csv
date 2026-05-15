@@ -1,0 +1,6 @@
+waiver_id,affected_requirement,disposition,approval_state,rationale,evidence_reference
+ATGSD-WVR-001,DEMO-PYRO-130,not_applicable,approved,"Architecture excludes explosive pyrotechnic and energetic devices; no ordnance storage transport firing circuit initiator safe-and-arm device or pyrotechnic connector exists.","ATGSD-SAD-001 Rev C Sec Exclusions; ATGSD-HAZ-001 Rev E HAZ-005"
+ATGSD-WVR-002,DEMO-RS-010,tailored,approved,"Range safety process applies only to pad operations and lifted-load exclusion zones; flight termination and ordnance controls are outside project scope.","ATGSD-RS-TAILOR-010 Rev A"
+ATGSD-WVR-003,DEMO-CORR-112,conditional,approved,"Legacy sealed relay includes cadmium plating but is outside oxygen service and not normally touched by operators.","ATGSD-MP-PLAN-012 Rev D Cadmium waiver paragraph"
+ATGSD-WVR-004,DEMO-STR-022,tailored,pending,"Human-rated structural provisions are retained only for operator-adjacent lifting fixtures; non-load-path panels use project standard design factors.","ATGSD-TAILOR-STR-022 Rev B"
+

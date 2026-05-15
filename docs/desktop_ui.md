@@ -35,6 +35,8 @@ The UI is organized around the human process, not just the command sequence:
 - **Artifacts**: inspect generated JSON, CSV, hash manifests, proposals, approval records, and agent-definition exports.
 - **Approvals**: review required approval context and create drafted, reviewed, rejected, approved, or baselined approval artifacts with author, role, justification, timestamp, and RVM hash.
 
+Most UI sections include a small **?** help button next to the section title. The help window explains what the section is for, what data belongs there, where that data should come from, and how the section affects the rest of the RVM workflow.
+
 ## Normal Production Flow
 
 1. Open **Inputs**.

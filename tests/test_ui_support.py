@@ -19,6 +19,7 @@ from learning_agent.ui_support import (
     summarize_review,
     update_learning_candidate_status,
 )
+from learning_agent.ui import HELP_SECTIONS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -112,6 +113,46 @@ def test_learning_queue_lifecycle_is_file_backed() -> None:
     assert reloaded[0]["status"] == "approved"
     assert reloaded[0]["applied_ids"] == ["vec-1"]
     _clean_scratch()
+
+
+def test_ui_help_sections_cover_required_explanation_parts() -> None:
+    required_sections = {
+        "Standard / requirement documents",
+        "Project context / DOORS exports / design documents",
+        "Evidence artifacts to hash",
+        "Workflow and memory policy",
+        "Initial optimization from known-good RVMs",
+        "Resolved persistent memory locations",
+        "Reference and project memory",
+        "Learning queue",
+        "Search persistent memory",
+        "Run actions",
+        "Current review artifact",
+        "Run log",
+        "Compliance",
+        "Failures",
+        "Decisions",
+        "Avg Confidence",
+        "Low Confidence",
+        "Not Applicable",
+        "Required human actions",
+        "Compliance findings",
+        "RVM decisions",
+        "Artifact output directory",
+        "Generated artifacts",
+        "Artifact preview",
+        "Approval context",
+        "Record approval state",
+        "Guide",
+    }
+
+    assert required_sections <= set(HELP_SECTIONS)
+    for section in required_sections:
+        content = HELP_SECTIONS[section]
+        assert content["summary"]
+        assert content["details"]
+        assert content["sources"]
+        assert content["usage"]
 
 
 def _clean_scratch() -> None:

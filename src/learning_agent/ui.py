@@ -4,7 +4,7 @@ import json
 import queue
 import threading
 from pathlib import Path
-from tkinter import END, BOTH, LEFT, RIGHT, TOP, X, Y, BooleanVar, Listbox, StringVar, Tk, filedialog, messagebox, scrolledtext, ttk
+from tkinter import END, BOTH, LEFT, RIGHT, TOP, X, Y, BooleanVar, Listbox, StringVar, Tk, Toplevel, filedialog, messagebox, scrolledtext, ttk
 from typing import Any, Callable
 
 from learning_agent.core.artifacts import tracked_files, write_manifest
@@ -46,6 +46,171 @@ DEFAULT_MODEL_PATH = "models/llama-cpp/bge-small-en-v1.5-q4_k_m.gguf"
 DEFAULT_REVIEW_PATH = Path("out/ui/review.json")
 DEFAULT_COMPLIANCE_PATH = Path("out/ui/compliance_report.json")
 
+HELP_SECTIONS: dict[str, dict[str, str]] = {
+    "Standard / requirement documents": {
+        "summary": "Authoritative standards and requirement records that drive the RVM decisions.",
+        "details": "Add the canonical requirements the workflow must evaluate. This section should contain requirement IDs, exact requirement text, parent and child relationships when available, verification expectations, applicability notes, assurance metadata, and stable source anchors such as document IDs, revisions, sections, paragraphs, table names, sheet names, or row numbers. Supported inputs include CSV, TSV, XLSX, JSON, TXT, Markdown, ReqIF, ReqIFZ, and XML files. Spreadsheet and CSV-style files should preserve column headings and row identity; text-like files should keep enough surrounding context for the parser to recover requirement boundaries.",
+        "sources": "Use controlled standards, exported requirements databases, DOORS or ReqIF baselines, certification basis documents, project requirement specifications, or known-good requirement tables. Prefer released or baselined sources over informal notes, and keep the revision aligned with the project review baseline.",
+        "usage": "These files become the requirement set reviewed by the workflow. Their IDs and text feed applicability, traceability, verification method, compliance, and impact decisions. Missing IDs, ambiguous requirement boundaries, or stale revisions can cascade into orphan traces, wrong applicability decisions, low confidence, compliance findings, and poor comparisons against known-good RVMs.",
+    },
+    "Project context / DOORS exports / design documents": {
+        "summary": "Project-specific context that explains how the requirements apply to this system.",
+        "details": "Add architecture, design, planning, interface, safety, verification, and project-scope information that helps decide applicability and trace links. Useful content includes system boundaries, subsystem responsibilities, allocation rationale, DOORS exports, design descriptions, verification plans, test strategy, change summaries, certification assumptions, DAL or assurance levels, and evidence explaining why a requirement is applicable or not applicable. Supported formats match the document picker: CSV, TSV, XLSX, JSON, TXT, Markdown, ReqIF, ReqIFZ, and XML.",
+        "sources": "Use project-controlled sources such as architecture documents, design specifications, interface control documents, verification plans, exported requirement modules, change packages, safety assessments, and approved planning material. If project context comes from working drafts, make that status clear in the file content or filename.",
+        "usage": "The workflow retrieves this context when drafting RVM rows, impact analysis, non-applicability rationale, verification references, and human action lists. Project context is also indexed into workspace memory, so the selected workspace controls isolation. Weak or missing context usually creates low-confidence decisions, missing evidence findings, and extra approval work.",
+    },
+    "Evidence artifacts to hash": {
+        "summary": "Files that should be fingerprinted as verification or review evidence.",
+        "details": "Add concrete artifacts whose integrity should be recorded, such as test logs, signed reports, generated review outputs, tool exports, procedure files, screenshots, simulation outputs, analysis results, approval records, or controlled CSVs. Any file type is accepted because this section does not parse semantic content; it produces SHA-256 hashes, sizes, names, and paths for manifest-style evidence tracking.",
+        "sources": "Use outputs from verification runs, review sessions, configuration-controlled repositories, test environments, tool qualification records, or release packaging steps. Prefer final or review-ready artifacts rather than transient scratch files unless the transient state is exactly what needs to be preserved.",
+        "usage": "The Hash Evidence action writes a manifest that reviewers can use to verify that evidence has not changed after review. These hashes can support approval records, compliance disposition, and release packages, but they do not by themselves prove that the underlying evidence is sufficient or correct.",
+    },
+    "Workflow and memory policy": {
+        "summary": "Core run configuration, memory isolation, learning behavior, and model choices.",
+        "details": "Set the workspace, memory root, output directory, known-good RVM path, GGUF model path, changed requirement IDs, workflow engine, embedder, and learning-policy toggles. The workspace identifies the project boundary for working memory. The memory root controls where persistent reference, project, and crystallized memory stores live. Changed requirement IDs should be exact IDs separated by commas, semicolons, or new lines. Known-good RVM files should be CSV, TSV, or XLSX. GGUF model paths should point to local embedding models when using llama-cpp.",
+        "sources": "Use project workspace paths, local or shared memory folders chosen by your configuration-control process, approved output directories, known-good RVMs from reviewed baselines, and repo-contained or organization-approved GGUF models. Changed IDs should come from a change request, requirements delta, baseline comparison, or review package.",
+        "usage": "This section controls almost every downstream operation. Workspace and memory choices affect retrieval and contamination boundaries; output directory controls where artifacts are written; engine and embedder affect workflow behavior and retrieval quality; changed IDs focus impact analysis; learning toggles decide whether reviewer feedback enters the controlled learning queue or crystallized memory.",
+    },
+    "Initial optimization from known-good RVMs": {
+        "summary": "Training and improvement actions that learn from reviewed RVM examples.",
+        "details": "Use these actions after selecting standards and a known-good RVM. The known-good RVM should contain reviewed applicability decisions, verification methods, trace links, rationale, and evidence fields that represent the behavior you want future runs to emulate. The improvement actions compare current outputs against the known-good baseline and create governed proposal artifacts rather than silently changing approved logic.",
+        "sources": "Use human-reviewed, configuration-controlled RVMs from prior projects, certification exercises, regression suites, or internal gold datasets. The standards selected on the Inputs tab should be the same requirement sources used to produce the known-good RVM.",
+        "usage": "Initial optimization indexes requirements, optionally indexes project context, crystallizes correction examples, writes an optimization report, and can create improvement proposals. The resulting memory can improve future retrieval and decisions, while proposal artifacts support human-controlled changes to workflow policy or agent behavior.",
+    },
+    "Resolved persistent memory locations": {
+        "summary": "Read-only view of the file-backed memory stores currently in use.",
+        "details": "This section shows resolved paths, existence, sizes, and record counts for reference memory, workspace memory, the learning queue, and related manifests. It does not take files directly; it reflects the workspace and memory root settings from the workflow policy section.",
+        "sources": "The values come from the configured workspace path and memory root. Stores are created by indexing reference documents, indexing project memory, crystallizing known-good RVMs, applying learning candidates, or recording feedback.",
+        "usage": "Use this view to confirm that the UI is reading and writing the intended memory locations before running reviews or applying learning. Wrong memory paths can make a run appear to forget prior learning or, worse, retrieve context from the wrong workspace.",
+    },
+    "Reference and project memory": {
+        "summary": "Index selected inputs into reusable reference memory or workspace-specific memory.",
+        "details": "Index Reference Docs stores standards and broadly reusable requirement context. Index Project Memory stores project-only documents such as architecture, design, DOORS exports, and verification planning material. Inputs come from the files already listed on the Inputs tab. Supported file formats follow the parser and document ingestion support used elsewhere in the UI.",
+        "sources": "Reference memory should come from stable standards, common requirement sources, and reusable guidance. Project memory should come from controlled project artifacts and should stay scoped to the active workspace.",
+        "usage": "Indexed memory is retrieved during review, search, and future workflow runs. Reference memory improves requirement discovery and citation lookup across workspaces; project memory improves applicability and trace decisions within one workspace. Indexing the wrong documents can pollute retrieval and should be corrected by changing memory roots or cleaning the store under configuration control.",
+    },
+    "Learning queue": {
+        "summary": "Controlled holding area for reviewer feedback before it becomes reusable memory.",
+        "details": "The queue contains learning candidates captured from approval actions or other feedback workflows. Each candidate includes status, task, source, created time, rationale, input text, previous output, corrected output, tags, and applied memory IDs when approved. The UI displays the main review fields while the backing JSONL file preserves the full candidate record.",
+        "sources": "Candidates usually come from human approval, rejection, review, baselining, or explicit feedback captured by the UI. They may also come from generated improvement workflows that package reviewer disposition into a reusable correction.",
+        "usage": "Pending candidates do not affect future runs until applied. Applying selected candidates writes them to crystallized correction memory; rejecting them preserves the decision without teaching future workflows. This keeps human feedback useful while preventing silent behavioral drift.",
+    },
+    "Search persistent memory": {
+        "summary": "Search reference, crystallized correction, or project working memory.",
+        "details": "Enter a natural-language query, requirement ID, topic, document anchor, rationale phrase, or verification concept. Select the scope that matches what you want to inspect: reference memory for standards and reusable documents, crystallized corrections for learned examples, or project working memory for workspace-specific context.",
+        "sources": "Search results come only from stores already indexed or learned under the current memory configuration. If expected results are missing, refresh memory paths and confirm that the relevant documents were indexed into the selected scope.",
+        "usage": "Search is a diagnostic and review aid. It helps explain what context the workflow can retrieve, supports citation discovery, and helps reviewers verify that memory contains the intended sources. Search results are not approval evidence unless they point back to exact controlled source artifacts.",
+    },
+    "Run actions": {
+        "summary": "Commands that execute the review workflow and create operational artifacts.",
+        "details": "This section runs the complete draft-plus-audit workflow, audits an existing review, exports a controlled CSV, hashes evidence, creates a release manifest, or exports the versioned worker-agent definitions. The actions consume the selected inputs, current review artifact path, evidence list, output directory, and workflow settings as appropriate.",
+        "sources": "Inputs come from the Inputs tab, Agent Settings tab, and currently selected review artifact. Release manifests usually use tracked repository files; evidence manifests use the evidence list.",
+        "usage": "These actions produce the files reviewed in Results, Artifacts, and Approvals. Running a complete review updates review.json and compliance_report.json. Export and manifest actions create supporting artifacts for controlled review, release readiness, traceability, and reproducibility.",
+    },
+    "Current review artifact": {
+        "summary": "The review JSON file that Results, audit, export, and approvals operate on.",
+        "details": "Select or enter a review JSON path. The file should contain the RVM workflow output, including decisions, impacts, compliance report data, verification artifact metadata, audit findings, and graph information when available. The default UI run writes this to out/ui/review.json.",
+        "sources": "Use review artifacts created by Run Complete Draft + Audit, CLI review-rvm output, or another controlled workflow that follows the same JSON structure.",
+        "usage": "Audit Current Review, Export Controlled CSV, Load Results, and Approval actions all read this path. Selecting the wrong artifact can show stale results, export the wrong CSV, or attach approval state to the wrong review hash.",
+    },
+    "Run log": {
+        "summary": "Chronological status output for UI operations.",
+        "details": "This section records started, finished, and error messages for long-running UI actions. It contains operational messages, output file paths, and exception text when a command fails. It is not intended for source documents or review evidence.",
+        "sources": "Messages come from UI worker tasks such as indexing, running reviews, auditing, exporting, hashing, searching, learning, and approvals.",
+        "usage": "Use the log to confirm what action ran, where outputs were written, and what failed. The log helps troubleshoot workflow state, but generated artifacts and manifests remain the controlled outputs.",
+    },
+    "Compliance": {
+        "summary": "Overall deterministic compliance state for the current review.",
+        "details": "This metric shows whether deterministic compliance checks passed or still need review. It is derived from the compliance report embedded in the selected review artifact, not from model confidence.",
+        "sources": "The value comes from compliance_report data produced by the draft-plus-audit workflow or Audit Current Review.",
+        "usage": "Compliance status gates approval readiness. A pass does not replace human review, but failures identify objective issues that must be closed or dispositioned before approval.",
+    },
+    "Failures": {
+        "summary": "Count of deterministic compliance failures in the current review.",
+        "details": "This metric counts failure-level findings such as missing trace links, missing evidence, incomplete assurance metadata, weak objective criteria, or missing non-applicability evidence depending on the audit rules triggered.",
+        "sources": "The count comes from the selected review artifact's compliance report.",
+        "usage": "Failure count drives required human actions and should trend to zero before approval. Each failure usually maps to one or more rows in Compliance findings.",
+    },
+    "Decisions": {
+        "summary": "Number of RVM decision rows in the current review.",
+        "details": "This metric counts drafted decisions created from the input requirement set. Each decision should correspond to a requirement ID and contain applicability, verification method, rationale, trace links, evidence references, confidence, and assurance fields when available.",
+        "sources": "The count comes from the decisions array in the selected review JSON.",
+        "usage": "This helps confirm input coverage. Unexpectedly low or high counts can indicate parsing problems, wrong input files, duplicate records, or a stale review artifact.",
+    },
+    "Avg Confidence": {
+        "summary": "Average workflow confidence across RVM decisions.",
+        "details": "This metric averages numeric confidence values supplied with each decision. Confidence reflects workflow certainty, retrieval support, and policy fit; it is not an approval state and should not be treated as certification evidence.",
+        "sources": "Values come from decision confidence fields in the selected review artifact.",
+        "usage": "Average confidence helps triage review effort. Low averages suggest missing context, ambiguous requirements, weak memory retrieval, or decisions that need more human scrutiny.",
+    },
+    "Low Confidence": {
+        "summary": "Number of decisions below the review confidence threshold.",
+        "details": "This metric counts decisions with confidence below the UI support threshold. These decisions may have weak context, ambiguous applicability, incomplete traces, or insufficient evidence support.",
+        "sources": "The count comes from decision confidence fields in the selected review artifact.",
+        "usage": "Low-confidence rows generate review actions and should be inspected before sign-off. Improving standards, project context, memory indexing, or known-good examples can reduce this count.",
+    },
+    "Not Applicable": {
+        "summary": "Number of requirements marked not applicable.",
+        "details": "This metric counts decisions whose applicability is not_applicable. Such decisions need explicit boundary, architecture, certification-basis, or allocation evidence explaining why the requirement is outside scope.",
+        "sources": "The count comes from applicability fields in the selected review artifact.",
+        "usage": "Not-applicable counts affect approval workload because each exclusion needs human review and strong evidence. Missing evidence creates compliance findings and required human actions.",
+    },
+    "Required human actions": {
+        "summary": "Specific reviewer work needed before approval or baselining.",
+        "details": "This section lists prioritized actions derived from the review decisions, compliance findings, audit findings, confidence values, assurance metadata, evidence fields, and non-applicability decisions. It includes the action type and context explaining what must be fixed, reviewed, or approved.",
+        "sources": "Rows are generated from the selected review JSON by UI support logic. They are not manually entered here.",
+        "usage": "Use this as the reviewer punch list. Approval should wait until required items are resolved, dispositioned, or captured in approval justification. These actions also feed learning candidates when reviewer dispositions are captured.",
+    },
+    "Compliance findings": {
+        "summary": "Detailed deterministic audit findings for the current review.",
+        "details": "Each row includes severity, rule ID, requirement ID, message, and suggested fix. Findings cover objective rule checks such as traceability, evidence anchors, execution artifacts, objective criteria, change rationale, assurance mapping, lifecycle objectives, and non-applicability evidence.",
+        "sources": "Findings come from the compliance audit embedded in the selected review artifact or produced by Audit Current Review.",
+        "usage": "Findings explain why Compliance is not ready and provide fix guidance. They also drive Required human actions and help reviewers decide whether to rerun the workflow, add source data, or manually correct the controlled RVM.",
+    },
+    "RVM decisions": {
+        "summary": "Draft requirement verification matrix decisions produced by the workflow.",
+        "details": "Rows show requirement ID, applicability, verification method, confidence, parent links, and child links. The backing review JSON contains additional fields such as rationale, procedure references, execution artifacts, assurance standard, DAL, lifecycle objectives, change rationale, source anchors, impacts, and audit metadata.",
+        "sources": "Decisions are generated from standard or requirement documents, project context, memory retrieval, workflow policies, and any learned correction examples in crystallized memory.",
+        "usage": "These decisions are the central RVM draft. They feed CSV export, compliance audit, required actions, approval context, learning capture, and downstream release or evidence artifacts. Reviewer corrections here should be reflected in controlled outputs or future learning candidates.",
+    },
+    "Artifact output directory": {
+        "summary": "Folder scanned for generated UI artifacts.",
+        "details": "Enter or confirm the directory where UI outputs are written and refreshed. The default is out/ui. The section expects a directory path, not individual artifact files.",
+        "sources": "The path comes from Agent Settings and can be changed here through the same variable.",
+        "usage": "Refresh scans this directory recursively and populates the artifact inventory. If this points to the wrong folder, Artifacts will appear empty or show stale files.",
+    },
+    "Generated artifacts": {
+        "summary": "Inventory of files produced under the configured output directory.",
+        "details": "This table lists artifact name, type, size, and modified timestamp. Common artifacts include review.json, compliance_report.json, review.csv, evidence_manifest.json, release_manifest.json, agent_definitions.json, improvements.json, change_proposal.json, approval records, and initial optimization reports.",
+        "sources": "Rows come from files already written by UI actions or compatible CLI runs under the selected output directory.",
+        "usage": "Select an artifact to inspect it in the preview pane. The inventory helps reviewers find controlled outputs, confirm timestamps, and navigate generated evidence without leaving the UI.",
+    },
+    "Artifact preview": {
+        "summary": "Read-only preview of the selected generated artifact.",
+        "details": "JSON files are pretty-printed when possible, and text-like files are shown as readable text. Very large files may be truncated for UI responsiveness. Binary files or unsupported encodings may show a preview error.",
+        "sources": "The preview reads the currently selected artifact from the Generated artifacts table.",
+        "usage": "Use this pane for quick inspection before opening or attaching artifacts elsewhere. Preview does not modify artifacts and does not replace controlled review of source files when fidelity matters.",
+    },
+    "Approval context": {
+        "summary": "Review readiness context assembled from the current review artifact.",
+        "details": "This section shows required human actions and the selected review artifact path. It is generated from the current review JSON and highlights unresolved work that should be considered before recording approval, rejection, baselining, or review state.",
+        "sources": "Content comes from the review artifact selected in Run and the same required-action logic used by Results.",
+        "usage": "Read this before creating an approval artifact. The context helps ensure the justification addresses the actual blockers and that the approval record is tied to the intended review file.",
+    },
+    "Record approval state": {
+        "summary": "Create a signed review-state artifact for the current RVM review.",
+        "details": "Enter state, author ID, role, and justification. The state can be drafted, reviewed, rejected, approved, or baselined. The justification should explain the human disposition, remaining constraints, evidence reviewed, and rationale for approval or rejection. The generated approval artifact includes timestamp and review hash metadata.",
+        "sources": "Author, role, and justification should come from the responsible reviewer, approver, verification lead, certification engineer, or configuration-control authority. The review hash comes from the selected review artifact.",
+        "usage": "Approval artifacts document human disposition and can optionally create learning candidates from the feedback. They affect auditability and future learning workflows, but they do not alter the original review JSON unless separate controlled edits are made.",
+    },
+    "Guide": {
+        "summary": "Built-in operating overview for the desktop control center.",
+        "details": "This section contains a compact workflow guide covering the major tabs, normal production flow, artifact locations, memory behavior, and local execution assumptions. It is informational text rather than source data.",
+        "sources": "The guide summarizes repository documentation, especially the desktop UI and workflow assurance guidance.",
+        "usage": "Use it as an orientation aid while operating the UI. For deeper process requirements, read the repository docs and your project-specific certification or assurance plan.",
+    },
+}
+
 
 class FileList(ttk.Frame):
     def __init__(
@@ -54,6 +219,7 @@ class FileList(ttk.Frame):
         label: str,
         filetypes: list[tuple[str, str]],
         height: int = 5,
+        help_command: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self.filetypes = filetypes
@@ -61,6 +227,10 @@ class FileList(ttk.Frame):
         header = ttk.Frame(self)
         header.pack(side=TOP, fill=X)
         ttk.Label(header, text=label, style="Section.TLabel").pack(side=LEFT)
+        if help_command:
+            ttk.Button(header, text="?", width=2, style="Help.TButton", command=lambda: help_command(label)).pack(
+                side=LEFT, padx=(6, 0)
+            )
         ttk.Button(header, text="Add", command=self.add_files).pack(side=RIGHT, padx=(4, 0))
         ttk.Button(header, text="Remove", command=self.remove_selected).pack(side=RIGHT, padx=(4, 0))
 
@@ -174,6 +344,7 @@ class LearningAgentApp(Tk):
         style.configure("Metric.TLabel", background=bg, foreground="#7dd3fc", font=("Segoe UI", 16, "bold"))
         style.configure("Status.TLabel", background=bg, foreground="#a7f3d0", font=("Segoe UI", 10, "bold"))
         style.configure("TButton", background=surface_2, foreground=text, bordercolor=border, focusthickness=1, padding=(10, 5))
+        style.configure("Help.TButton", background=surface_2, foreground="#dbeafe", bordercolor=border, padding=(4, 1))
         style.map(
             "TButton",
             background=[("active", "#243244"), ("pressed", accent)],
@@ -224,6 +395,41 @@ class LearningAgentApp(Tk):
             pady=6,
         )
 
+    def _section_frame(self, parent: ttk.Widget, title: str, padding: int | tuple[int, ...] = 10) -> ttk.LabelFrame:
+        header = ttk.Frame(parent)
+        ttk.Label(header, text=title, style="Section.TLabel").pack(side=LEFT)
+        ttk.Button(header, text="?", width=2, style="Help.TButton", command=lambda: self._show_help(title)).pack(
+            side=LEFT, padx=(6, 0)
+        )
+        return ttk.LabelFrame(parent, labelwidget=header, padding=padding)
+
+    def _show_help(self, title: str) -> None:
+        content = HELP_SECTIONS.get(title)
+        if content is None:
+            messagebox.showinfo(APP_TITLE, f"No help is available for {title}.")
+            return
+        window = Toplevel(self)
+        window.title(f"{title} Help")
+        window.geometry("760x620")
+        window.minsize(560, 420)
+        window.configure(bg="#0f141b")
+        text = scrolledtext.ScrolledText(window, wrap="word")
+        self._style_text_widget(text)
+        text.pack(fill=BOTH, expand=True, padx=12, pady=12)
+        text.insert(
+            END,
+            "\n\n".join(
+                [
+                    title,
+                    f"Short summary\n{content['summary']}",
+                    f"In-depth explanation\n{content['details']}",
+                    f"Where this information should come from\n{content['sources']}",
+                    f"How this data is used in the workflow\n{content['usage']}",
+                ]
+            ),
+        )
+        text.configure(state="disabled")
+
     def _build_layout(self) -> None:
         root = ttk.Frame(self, padding=12)
         root.pack(fill=BOTH, expand=True)
@@ -262,12 +468,18 @@ class LearningAgentApp(Tk):
             ("Supported documents", "*.csv *.tsv *.xlsx *.json *.txt *.md *.reqif *.reqifz *.xml"),
             ("All files", "*.*"),
         ]
-        self.standards_list = FileList(left, "Standard / requirement documents", filetypes)
+        self.standards_list = FileList(left, "Standard / requirement documents", filetypes, help_command=self._show_help)
         self.standards_list.pack(fill=BOTH, expand=True, pady=(0, 10))
-        self.project_list = FileList(left, "Project context / DOORS exports / design documents", filetypes)
+        self.project_list = FileList(left, "Project context / DOORS exports / design documents", filetypes, help_command=self._show_help)
         self.project_list.pack(fill=BOTH, expand=True)
 
-        self.evidence_list = FileList(right, "Evidence artifacts to hash", [("Evidence files", "*.*")], height=4)
+        self.evidence_list = FileList(
+            right,
+            "Evidence artifacts to hash",
+            [("Evidence files", "*.*")],
+            height=4,
+            help_command=self._show_help,
+        )
         self.evidence_list.pack(fill=BOTH, expand=True, pady=(0, 10))
 
     def _build_agent_settings_tab(self) -> None:
@@ -281,7 +493,7 @@ class LearningAgentApp(Tk):
         body.add(left, weight=1)
         body.add(right, weight=1)
 
-        controls = ttk.LabelFrame(left, text="Workflow and memory policy", padding=10)
+        controls = self._section_frame(left, "Workflow and memory policy")
         controls.pack(fill=X)
         self._path_row(controls, "Workspace", self.workspace_var, self._choose_workspace, 0)
         self._path_row(controls, "Memory root", self.memory_root_var, self._choose_memory_root, 1)
@@ -317,26 +529,26 @@ class LearningAgentApp(Tk):
         )
         controls.columnconfigure(1, weight=1)
 
-        optimization = ttk.LabelFrame(left, text="Initial optimization from known-good RVMs", padding=10)
+        optimization = self._section_frame(left, "Initial optimization from known-good RVMs")
         optimization.pack(fill=X, pady=(10, 0))
         ttk.Button(optimization, text="Run Initial Optimization", command=self._run_initial_optimization).pack(side=LEFT, padx=(0, 6))
         ttk.Button(optimization, text="Crystallize Good RVM", command=self._learn_good_rvm).pack(side=LEFT, padx=6)
         ttk.Button(optimization, text="Suggest Improvements", command=self._suggest_improvements).pack(side=LEFT, padx=6)
         ttk.Button(optimization, text="Create Change Proposal", command=self._create_change_proposal).pack(side=LEFT, padx=6)
 
-        paths = ttk.LabelFrame(left, text="Resolved persistent memory locations", padding=10)
+        paths = self._section_frame(left, "Resolved persistent memory locations")
         paths.pack(fill=BOTH, expand=True, pady=(10, 0))
         self.memory_paths_text = scrolledtext.ScrolledText(paths, height=9, wrap="word")
         self._style_text_widget(self.memory_paths_text)
         self.memory_paths_text.pack(fill=BOTH, expand=True)
         ttk.Button(paths, text="Refresh Memory Paths", command=self._refresh_memory_paths).pack(side=RIGHT, pady=(8, 0))
 
-        indexing = ttk.LabelFrame(right, text="Reference and project memory", padding=10)
+        indexing = self._section_frame(right, "Reference and project memory")
         indexing.pack(fill=X)
         ttk.Button(indexing, text="Index Reference Docs", command=self._index_reference_docs).pack(side=LEFT, padx=(0, 6))
         ttk.Button(indexing, text="Index Project Memory", command=self._index_project_docs).pack(side=LEFT, padx=6)
 
-        queue_frame = ttk.LabelFrame(right, text="Learning queue", padding=10)
+        queue_frame = self._section_frame(right, "Learning queue")
         queue_frame.pack(fill=BOTH, expand=True, pady=(10, 0))
         queue_buttons = ttk.Frame(queue_frame)
         queue_buttons.pack(fill=X, pady=(0, 8))
@@ -355,7 +567,7 @@ class LearningAgentApp(Tk):
         )
         self.learning_tree.pack(fill=BOTH, expand=True)
 
-        search = ttk.LabelFrame(right, text="Search persistent memory", padding=10)
+        search = self._section_frame(right, "Search persistent memory")
         search.pack(fill=BOTH, expand=True, pady=(10, 0))
         row = ttk.Frame(search)
         row.pack(fill=X)
@@ -376,7 +588,7 @@ class LearningAgentApp(Tk):
         tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(tab, text="Run")
 
-        actions = ttk.Frame(tab)
+        actions = self._section_frame(tab, "Run actions")
         actions.pack(fill=X)
         ttk.Button(actions, text="Run Complete Draft + Audit", command=self._run_complete_review).pack(side=LEFT, padx=(0, 6))
         ttk.Button(actions, text="Audit Current Review", command=self._audit_current_review).pack(side=LEFT, padx=6)
@@ -385,16 +597,17 @@ class LearningAgentApp(Tk):
         ttk.Button(actions, text="Release Manifest", command=self._release_manifest).pack(side=LEFT, padx=6)
         ttk.Button(actions, text="Export Agent Definitions", command=self._export_agent_definitions).pack(side=LEFT, padx=6)
 
-        current = ttk.Frame(tab)
+        current = self._section_frame(tab, "Current review artifact")
         current.pack(fill=X, pady=(10, 0))
-        ttk.Label(current, text="Current review artifact").pack(side=LEFT)
         ttk.Entry(current, textvariable=self.review_path_var).pack(side=LEFT, fill=X, expand=True, padx=8)
         ttk.Button(current, text="Select", command=self._choose_review_path).pack(side=LEFT)
         ttk.Button(current, text="Load Results", command=self._load_results_from_path).pack(side=LEFT, padx=(6, 0))
 
         self.progress = ttk.Progressbar(tab, mode="indeterminate")
         self.progress.pack(fill=X, pady=(12, 8))
-        self.run_log = scrolledtext.ScrolledText(tab, wrap="word", height=28)
+        log_frame = self._section_frame(tab, "Run log")
+        log_frame.pack(fill=BOTH, expand=True)
+        self.run_log = scrolledtext.ScrolledText(log_frame, wrap="word", height=28)
         self._style_text_widget(self.run_log)
         self.run_log.pack(fill=BOTH, expand=True)
 
@@ -413,14 +626,14 @@ class LearningAgentApp(Tk):
             "Not Applicable": StringVar(value="0"),
         }
         for label, var in self.metric_vars.items():
-            card = ttk.LabelFrame(metrics, text=label, padding=10)
+            card = self._section_frame(metrics, label)
             card.pack(side=LEFT, fill=X, expand=True, padx=(0, 8))
             ttk.Label(card, textvariable=var, style="Metric.TLabel").pack(anchor="w")
 
         panes = ttk.PanedWindow(tab, orient="vertical")
         panes.pack(fill=BOTH, expand=True, pady=(10, 0))
 
-        action_frame = ttk.LabelFrame(panes, text="Required human actions", padding=8)
+        action_frame = self._section_frame(panes, "Required human actions", padding=8)
         self.action_tree = ttk.Treeview(
             action_frame,
             columns=("priority", "action", "context"),
@@ -435,7 +648,7 @@ class LearningAgentApp(Tk):
         lower = ttk.PanedWindow(panes, orient="horizontal")
         panes.add(lower, weight=3)
 
-        findings_frame = ttk.LabelFrame(lower, text="Compliance findings", padding=8)
+        findings_frame = self._section_frame(lower, "Compliance findings", padding=8)
         self.findings_tree = ttk.Treeview(
             findings_frame,
             columns=("severity", "rule_id", "requirement_id", "message", "fix"),
@@ -448,7 +661,7 @@ class LearningAgentApp(Tk):
         self.findings_tree.pack(fill=BOTH, expand=True)
         lower.add(findings_frame, weight=1)
 
-        decisions_frame = ttk.LabelFrame(lower, text="RVM decisions", padding=8)
+        decisions_frame = self._section_frame(lower, "RVM decisions", padding=8)
         self.decisions_tree = ttk.Treeview(
             decisions_frame,
             columns=("requirement_id", "applicability", "method", "confidence", "parents", "children"),
@@ -472,16 +685,15 @@ class LearningAgentApp(Tk):
         tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(tab, text="Artifacts")
 
-        top = ttk.Frame(tab)
+        top = self._section_frame(tab, "Artifact output directory")
         top.pack(fill=X)
-        ttk.Label(top, text="Output directory").pack(side=LEFT)
         ttk.Entry(top, textvariable=self.out_dir_var).pack(side=LEFT, fill=X, expand=True, padx=8)
         ttk.Button(top, text="Refresh", command=self._refresh_artifacts).pack(side=LEFT)
 
         panes = ttk.PanedWindow(tab, orient="horizontal")
         panes.pack(fill=BOTH, expand=True, pady=(10, 0))
-        left = ttk.Frame(panes)
-        right = ttk.Frame(panes)
+        left = self._section_frame(panes, "Generated artifacts")
+        right = self._section_frame(panes, "Artifact preview")
         panes.add(left, weight=1)
         panes.add(right, weight=2)
 
@@ -505,9 +717,9 @@ class LearningAgentApp(Tk):
         tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(tab, text="Approvals")
 
-        left = ttk.Frame(tab)
+        left = self._section_frame(tab, "Approval context")
         left.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 8))
-        right = ttk.LabelFrame(tab, text="Record approval state", padding=10)
+        right = self._section_frame(tab, "Record approval state")
         right.pack(side=RIGHT, fill=BOTH, expand=True, padx=(8, 0))
 
         self.approval_context = scrolledtext.ScrolledText(left, wrap="word")
@@ -539,7 +751,9 @@ class LearningAgentApp(Tk):
     def _build_guide_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(tab, text="Guide")
-        guide = scrolledtext.ScrolledText(tab, wrap="word")
+        guide_frame = self._section_frame(tab, "Guide")
+        guide_frame.pack(fill=BOTH, expand=True)
+        guide = scrolledtext.ScrolledText(guide_frame, wrap="word")
         self._style_text_widget(guide)
         guide.pack(fill=BOTH, expand=True)
         guide.insert(
