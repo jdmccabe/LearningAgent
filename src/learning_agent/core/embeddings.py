@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import math
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class Embedder(Protocol):
@@ -31,8 +32,20 @@ class LlamaCppEmbedder:
 
     model_path: str | Path = Path("models/llama-cpp/bge-small-en-v1.5-q4_k_m.gguf")
     name: str = "llama-cpp"
+    n_ctx: int = 1024
+    n_batch: int = 2
+    n_ubatch: int = 2
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        model = self._model
+        vectors: list[list[float]] = []
+        for text in texts:
+            response = model.create_embedding(text)
+            vectors.append(list(response["data"][0]["embedding"]))
+        return [_normalize(vector) for vector in vectors]
+
+    @cached_property
+    def _model(self) -> Any:
         try:
             from llama_cpp import Llama
         except ImportError as exc:
@@ -43,12 +56,14 @@ class LlamaCppEmbedder:
         path = Path(self.model_path)
         if not path.exists():
             raise FileNotFoundError(f"Embedding model was not found: {path}")
-        model = Llama(model_path=str(path), embedding=True, verbose=False)
-        vectors: list[list[float]] = []
-        for text in texts:
-            response = model.create_embedding(text)
-            vectors.append(list(response["data"][0]["embedding"]))
-        return [_normalize(vector) for vector in vectors]
+        return Llama(
+            model_path=str(path),
+            embedding=True,
+            n_ctx=self.n_ctx,
+            n_batch=self.n_batch,
+            n_ubatch=self.n_ubatch,
+            verbose=False,
+        )
 
 
 def cosine_similarity(left: list[float], right: list[float]) -> float:

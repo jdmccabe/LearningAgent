@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 from learning_agent.core.workflow import Workflow, WorkflowState
@@ -9,7 +10,13 @@ def run_langgraph_workflow(workflow: Workflow, state: WorkflowState) -> Workflow
     """Run a Workflow through LangGraph."""
 
     try:
-        from langgraph.graph import END, START, StateGraph
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r"Core Pydantic V1 functionality isn't compatible with Python 3\.14 or greater\.",
+                category=UserWarning,
+            )
+            from langgraph.graph import END, START, StateGraph
     except ImportError as exc:
         raise RuntimeError(
             "LangGraph is not installed. Install the project dependencies with "
